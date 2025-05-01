@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from app.services.sql_service import sql_service
 from pydantic import BaseModel
 from typing import List, Dict, Any
-from app.core.security import oauth2_scheme
+# Authentication removed
+# from app.core.security import oauth2_scheme
 
 router = APIRouter()
 
@@ -14,34 +15,44 @@ class QueryResponse(BaseModel):
 
 @router.post("/nl", response_model=QueryResponse)
 async def execute_nl_query(
-    request: QueryRequest,
-    token: str = Depends(oauth2_scheme)
+    request: QueryRequest
 ) -> QueryResponse:
     """
     Execute a natural language query and return the results
     """
-    try:
-        results = await sql_service.execute_nl_query(request.query)
-        return QueryResponse(results=results)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+    results = await sql_service.execute_nl_query(request.query)
+
+    # Check if there was an error
+    if results and len(results) == 1 and "error" in results[0]:
+        error_message = results[0]["error"]
+        if "SQL service not available" in error_message:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="SQL service is not available"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_message
+            )
+
+    return QueryResponse(results=results)
 
 @router.post("/sql", response_model=QueryResponse)
 async def execute_sql_query(
-    request: QueryRequest,
-    token: str = Depends(oauth2_scheme)
+    request: QueryRequest
 ) -> QueryResponse:
     """
     Execute a raw SQL query and return the results
     """
-    try:
-        results = await sql_service.execute_sql_query(request.query)
-        return QueryResponse(results=results)
-    except Exception as e:
+    results = await sql_service.execute_sql_query(request.query)
+
+    # Check if there was an error
+    if results and len(results) == 1 and "error" in results[0]:
+        error_message = results[0]["error"]
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        ) 
+            detail=error_message
+        )
+
+    return QueryResponse(results=results)

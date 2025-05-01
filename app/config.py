@@ -30,6 +30,19 @@ class Settings(BaseSettings):
         description="List of origins that are allowed to make cross-site requests"
     )
     
+    # LLM settings
+    LLM_TYPE: str = "openai"
+    LLM_API_KEY: str = ""
+    LLM_MODEL: str = "gpt-3.5-turbo"
+    
+    # Vector DB settings
+    VECTOR_DB_TYPE: str = "chroma"  # or "pinecone"
+    VECTOR_DB_API_KEY: str = ""  # Only needed for Pinecone
+    
+    # Speech-to-Text settings
+    STT_PROVIDER: str = "google"
+    STT_API_KEY: str = ""
+    
     @field_validator('DEBUG', mode='before')
     @classmethod
     def parse_debug(cls, v):
@@ -83,5 +96,11 @@ class Settings(BaseSettings):
         access_token_expire = os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES")
         if access_token_expire:
             self.ACCESS_TOKEN_EXPIRE_MINUTES = int(access_token_expire)
+        
+        self.VECTOR_DB_TYPE = os.getenv("VECTOR_DB_TYPE", self.VECTOR_DB_TYPE)
+        self.VECTOR_DB_API_KEY = os.getenv("VECTOR_DB_API_KEY", self.VECTOR_DB_API_KEY)
+        
+        self.STT_PROVIDER = os.getenv("STT_PROVIDER", self.STT_PROVIDER)
+        self.STT_API_KEY = os.getenv("STT_API_KEY", self.STT_API_KEY)
 
 settings = Settings() 
