@@ -1,8 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import mysql
-from app.api import cars, user as users, auth, chat, query
+from app.api import cars, user as users, auth, chat, query, monitoring
 from app.core.logging import logger
+from app.core.monitoring import MonitoringMiddleware
 import logging
 import uvicorn
 
@@ -28,30 +29,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add monitoring middleware
+app.add_middleware(MonitoringMiddleware)
+
 # Include routers
 app.include_router(cars.router, prefix="/api/cars", tags=["cars"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(query.router, prefix="/api/query", tags=["query"])
+# CSV data API has been consolidated into the cars API
+app.include_router(monitoring.router, prefix="/api/monitoring", tags=["monitoring"])
 
 @app.on_event("startup")
 async def startup():
     logger.info("Starting up application...")
-    logger.info("Initializing database connection...")
-    await mysql.connect()
 
-    # Create database tables
-    from app.core.database import Base, engine
-    # Import all models to register them with SQLAlchemy
-    import app.db.models  # This imports all models
+    # Initialize database connection with error handling
+    try:
+        logger.info("Initializing database connection...")
+        await mysql.connect()
 
-    async with engine.begin() as conn:
-        # Create tables if they don't exist
-        await conn.run_sync(Base.metadata.create_all)
+        # Create database tables
+        from app.core.database import Base, engine
+        # Import all models to register them with SQLAlchemy
+        try:
+            import app.db.models  # This imports all models
+        except ImportError as e:
+            logger.warning(f"Could not import models: {str(e)}")
+            logger.warning("Database tables may not be created properly")
 
-    logger.info("Database tables created successfully")
-    logger.info("Database connection established successfully")
+        try:
+            async with engine.begin() as conn:
+                # Create tables if they don't exist
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("Database tables created successfully")
+        except Exception as e:
+            logger.error(f"Failed to create database tables: {str(e)}")
+            logger.warning("Application will continue without database tables")
+
+        logger.info("Database connection established successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize SQL service: {str(e)}")
+        logger.warning("SQL service will be unavailable, but the application will continue to run.")
 
 @app.on_event("shutdown")
 async def shutdown():
