@@ -4,8 +4,8 @@ import json
 
 async def test_compare_endpoint():
     async with httpx.AsyncClient(base_url="http://localhost:8000") as client:
-        # Define the request body - send a direct list of IDs
-        data = [1, 2]
+        # Define the request body - send a JSON object with car_ids key
+        data = {"car_ids": [1, 2]}
 
         # Make the POST request
         response = await client.post("/api/cars/compare", json=data)

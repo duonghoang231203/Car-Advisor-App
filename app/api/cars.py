@@ -143,41 +143,43 @@ async def get_all_cars():
             detail=f"Error loading car data: {str(e)}"
         )
 
-@router.get("/detail/{car_id}", response_model=CarResponse)
-async def get_car_detail(
-    car_id: int
-) -> CarResponse:
-    """
-    Get comprehensive details for a specific car
-
-    Returns all available car information including:
-    - Make, Model, Year
-    - Engine details (Fuel Type, HP, Cylinders)
-    - Transmission Type
-    - Driven Wheels
-    - Number of Doors
-    - Market Category
-    - Vehicle Size and Style
-    - MPG (highway and city)
-    - Popularity
-    - MSRP (Manufacturer's Suggested Retail Price)
-    """
-    car_dict = await car_service.get_car_by_id(car_id)
-    if not car_dict:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Car not found"
-        )
-    # Convert dictionary to CarResponse model
-    return CarResponse(**car_dict)
+# Removed redundant endpoint /detail/{car_id} - consolidated with /{car_id} endpoint
 
 @router.post("/compare", response_model=List[CarResponse])
 async def compare_cars(
-    car_ids: List[int] = Body(...)
+    request: Dict[str, List] = Body(...)
 ) -> List[CarResponse]:
     """
     Compare multiple cars
+
+    Request body format:
+    {
+        "car_ids": [1, 2, 3]  # IDs can be integers or strings
+    }
     """
+    # Extract car_ids from the request body
+    car_ids_raw = request.get("car_ids", [])
+
+    if not car_ids_raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must provide car_ids in the request body"
+        )
+
+    # Convert string IDs to integers if needed
+    car_ids = []
+    for car_id in car_ids_raw:
+        try:
+            if isinstance(car_id, str):
+                car_ids.append(int(car_id))
+            else:
+                car_ids.append(car_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid car ID format: {car_id}. All IDs must be integers or convertible to integers."
+            )
+
     if len(car_ids) < 2 or len(car_ids) > 3:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
