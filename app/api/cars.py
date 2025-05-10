@@ -145,16 +145,26 @@ async def get_all_cars():
 
 # Removed redundant endpoint /detail/{car_id} - consolidated with /{car_id} endpoint
 
-@router.post("/compare", response_model=List[CarResponse])
+@router.post("/compare", response_model=Dict[str, Any])
 async def compare_cars(
     request: Dict[str, List] = Body(...)
-) -> List[CarResponse]:
+) -> Dict[str, Any]:
     """
     Compare multiple cars
 
     Request body format:
     {
         "car_ids": [1, 2, 3]  # IDs can be integers or strings
+    }
+
+    Returns:
+    {
+        "cars": [car1, car2, car3],
+        "specifications": {
+            "1": {spec1},
+            "2": {spec2},
+            "3": {spec3}
+        }
     }
     """
     # Extract car_ids from the request body
@@ -186,16 +196,17 @@ async def compare_cars(
             detail="You must provide 2 or 3 car IDs for comparison"
         )
 
-    car_dicts = await car_service.compare_cars(car_ids)
+    comparison_data = await car_service.compare_cars(car_ids)
 
-    if len(car_dicts) != len(car_ids):
+    # Check if we have cars in the response
+    if "cars" not in comparison_data or len(comparison_data["cars"]) != len(car_ids):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="One or more cars not found"
         )
 
-    # Convert dictionaries to CarResponse objects
-    return [CarResponse(**car_dict) for car_dict in car_dicts]
+    # Return the comparison data directly
+    return comparison_data
 
 # This route must be at the end to avoid catching other routes
 @router.get("/{car_id}", response_model=CarResponse)
