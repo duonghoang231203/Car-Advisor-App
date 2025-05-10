@@ -200,7 +200,7 @@ async def compare_cars(
 # This route must be at the end to avoid catching other routes
 @router.get("/{car_id}", response_model=CarResponse)
 async def get_car(
-    car_id: int
+    car_id: str
 ) -> CarResponse:
     """
     Get details for a specific car with all specifications
