@@ -40,8 +40,13 @@ async def send_message(
         user_message = Message(role="user", content=chat_request.message)
         session.messages.append(user_message)
 
-        # Process query with RAG
-        rag_result = await rag_service.process_query(chat_request.message)
+        # Process query with RAG, including conversation history
+        # Only pass the last 5 messages to avoid context window limitations
+        conversation_history = session.messages[-5:] if len(session.messages) > 0 else []
+        rag_result = await rag_service.process_query(
+            query=chat_request.message,
+            conversation_history=conversation_history
+        )
 
         # Add assistant message to session
         assistant_message = Message(role="assistant", content=rag_result["response"])
