@@ -6,7 +6,7 @@ from app.services.speech_service import speech_service
 # from app.core.security import oauth2_scheme
 # from app.api.auth import oauth2_scheme
 from bson import ObjectId
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 router = APIRouter()
@@ -59,8 +59,8 @@ async def send_message(
         # Prepare response
         response = ChatResponse(
             response=rag_result["response"],
-            suggestions=rag_result["suggestions"],
-            explanation=rag_result["explanation"],
+            suggestions=rag_result["suggestions"] if "suggestions" in rag_result else [],
+            explanation=rag_result["explanation"] if "explanation" in rag_result else "",
             session_id=str(session.id)
         )
         return response

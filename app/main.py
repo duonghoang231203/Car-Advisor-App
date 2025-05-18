@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import mysql
-from app.api import cars, user as users, auth, chat, query, monitoring
+from app.api import cars, user as users, auth, chat, monitoring
 from app.core.logging import logger
 from app.core.monitoring import MonitoringMiddleware
 import logging
@@ -37,7 +37,6 @@ app.include_router(cars.router, prefix="/api/cars", tags=["cars"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
-app.include_router(query.router, prefix="/api/query", tags=["query"])
 # CSV data API has been consolidated into the cars API
 app.include_router(monitoring.router, prefix="/api/monitoring", tags=["monitoring"])
 

@@ -377,252 +377,108 @@ class CarService:
 
             logger.info(f"Fetching car with ID {car_id}")
 
-            # Special case for Audi 100 (ID 17) - matches the ID in chat suggestions
-            if car_id == 17 or car_id == 18:
-                logger.info("Returning special case data for Audi 100 (ID 17/18)")
-                # Return hardcoded complete data for Audi 100
-                return {
-                    "id": 17,  # Use ID 17 to match the chat suggestions
-                    "name": "Audi 100",
-                    "brand": "Audi",
-                    "model": "100",
-                    "year": 1992,
-                    "price": 2000.0,
-                    "condition": "new",
-                    "type": "buy",
-                    "specifications": {
-                        "engine": "172 HP, 6 cylinders",
-                        "transmission": "MANUAL",
-                        "fuel_type": "regular unleaded",
-                        "mileage": 24.0,
-                        "seating_capacity": 5,
-                        "body_type": "Sedan",
-                        "engine_hp": 172,
-                        "engine_cylinders": 6,
-                        "engine_fuel_type": "regular unleaded",
-                        "transmission_type": "MANUAL",
-                        "driven_wheels": "front wheel drive",
-                        "number_of_doors": 4,
-                        "market_category": "Luxury",
-                        "vehicle_size": "Midsize",
-                        "vehicle_style": "Sedan",
-                        "highway_mpg": 24.0,
-                        "city_mpg": 17,
-                        "popularity": 3105,
-                        "msrp": 2000.0,
-                        "fuel_consumption": 24.0  # Add fuel_consumption for the comparison table
-                    },
-                    "description": "The Audi 100 is a Sedan car.",
+            # For all cars, fetch from database
+            async with self.session_factory() as session:
+                # Query the car
+                query = select(Car).where(Car.id == car_id)
+                result = await session.execute(query)
+                car = result.scalars().first()
+
+                if not car:
+                    logger.warning(f"Car with ID {car_id} not found in database")
+                    return None
+
+                # Extract vehicle_type from description
+                vehicle_type = None
+                if car.description:
+                    # The description format is typically "The {brand} {model} is a {vehicle_style} car."
+                    match = re.search(r'is a (.*?) car\.', car.description)
+                    if match:
+                        vehicle_type = match.group(1)
+
+                # Get the car specification
+                spec_result = await session.execute(
+                    select(CarSpecification).where(CarSpecification.car_id == car.id)
+                )
+                spec = spec_result.scalars().first()
+
+                # Parse engine details if available
+                engine_hp = None
+                engine_cylinders = None
+                if spec and spec.engine:
+                    # Try to extract HP and cylinders from the engine string
+                    # Format is typically "X HP, Y cylinders"
+                    hp_match = re.search(r'(\d+)\s*HP', spec.engine)
+                    if hp_match:
+                        engine_hp = int(hp_match.group(1))
+
+                    cyl_match = re.search(r'(\d+)\s*cylinders', spec.engine)
+                    if cyl_match:
+                        engine_cylinders = int(cyl_match.group(1))
+
+                # Create response dictionary with all detailed fields
+                car_dict = {
+                    "id": car.id,  # Keep the original ID from the database for consistency
+                    "name": car.name,
+                    "brand": car.brand,
+                    "model": car.model,
+                    "year": car.year,
+                    "price": car.price,
+                    "condition": car.condition,
+                    "type": car.type,
+                    "description": car.description,
                     "image_urls": [],
-                    "vehicle_type": "Sedan",
-                    "make": "Audi",
-                    "engine_fuel_type": "regular unleaded",
-                    "engine_hp": 172,
-                    "engine_cylinders": 6,
-                    "transmission_type": "MANUAL",
-                    "driven_wheels": "front wheel drive",
-                    "number_of_doors": 4,
-                    "market_category": "Luxury",
-                    "vehicle_size": "Midsize",
-                    "vehicle_style": "Sedan",
-                    "highway_mpg": 24.0,
-                    "city_mpg": 17,
-                    "popularity": 3105,
-                    "msrp": 2000.0,
-                    "engine": "172 HP, 6 cylinders",
-                    "transmission": "MANUAL",
-                    "fuel_type": "regular unleaded",
-                    "fuel_consumption": 24.0,  # Add fuel_consumption for the comparison table
-                    "features": {
-                        "safety": "ABS, Airbags",
-                        "comfort": "Air Conditioning",
-                        "technology": "Bluetooth"
-                    },
-                    "pros": "Good value",
-                    "cons": "Basic features"
+                    "vehicle_type": vehicle_type,
+
+                    # Map brand to make for consistency
+                    "make": car.brand,
+
+                    # Add detailed specification fields - directly access the new fields
+                    "engine_fuel_type": spec.engine_fuel_type if spec else None,
+                    "engine_hp": spec.engine_hp if spec else engine_hp,
+                    "engine_cylinders": spec.engine_cylinders if spec else engine_cylinders,
+                    "transmission_type": spec.transmission_type if spec else spec.transmission if spec else None,
+                    "driven_wheels": spec.driven_wheels if spec else None,
+                    "number_of_doors": spec.number_of_doors if spec else None,
+                    "market_category": spec.market_category if spec else None,
+                    "vehicle_size": spec.vehicle_size if spec else None,
+                    "vehicle_style": spec.vehicle_style if spec else spec.body_type if spec else vehicle_type,
+                    "highway_mpg": spec.highway_mpg if spec else float(spec.mileage) if spec and spec.mileage else None,
+                    "city_mpg": spec.city_mpg if spec else None,
+                    "popularity": spec.popularity if spec else None,
+                    "msrp": spec.msrp if spec else car.price,  # Using price as MSRP if not available
+
+                    # Include the full specification object for backward compatibility
+                    "specifications": {
+                        "engine": spec.engine if spec else None,
+                        "transmission": spec.transmission if spec else None,
+                        "fuel_type": spec.fuel_type if spec else None,
+                        "mileage": float(spec.mileage) if spec and spec.mileage else None,
+                        "seating_capacity": spec.seating_capacity if spec else None,
+                        "body_type": spec.body_type if spec else None,
+                        # Add all the detailed fields to specifications as well
+                        "engine_hp": spec.engine_hp if spec else engine_hp,
+                        "engine_cylinders": spec.engine_cylinders if spec else engine_cylinders,
+                        "engine_fuel_type": spec.engine_fuel_type if spec else spec.fuel_type if spec else None,
+                        "transmission_type": spec.transmission_type if spec else spec.transmission if spec else None,
+                        "driven_wheels": spec.driven_wheels if spec else None,
+                        "number_of_doors": spec.number_of_doors if spec else None,
+                        "market_category": spec.market_category if spec else None,
+                        "vehicle_size": spec.vehicle_size if spec else None,
+                        "vehicle_style": spec.vehicle_style if spec else spec.body_type if spec else vehicle_type,
+                        "highway_mpg": spec.highway_mpg if spec else float(spec.mileage) if spec and spec.mileage else None,
+                        "city_mpg": spec.city_mpg if spec else None,
+                        "popularity": spec.popularity if spec else None,
+                        "msrp": spec.msrp if spec else car.price
+                    } if spec else None
                 }
 
-            # Special case for Mercedes-Benz 190-Class (ID 35)
-            if car_id == 35 or car_id == 41:
-                logger.info("Returning special case data for Mercedes-Benz 190-Class (ID 35/41)")
-                # Return hardcoded complete data for Mercedes-Benz 190-Class
-                return {
-                    "id": 35,  # Use ID 35 to match the chat suggestions
-                    "name": "Mercedes-Benz 190-Class",
-                    "brand": "Mercedes-Benz",
-                    "model": "190-Class",
-                    "year": 1993,
-                    "price": 2000.0,
-                    "condition": "new",
-                    "type": "buy",
-                    "specifications": {
-                        "engine": "130 HP, 4 cylinders",
-                        "transmission": "MANUAL",
-                        "fuel_type": "regular unleaded",
-                        "mileage": 26.0,
-                        "seating_capacity": 5,
-                        "body_type": "Sedan",
-                        "engine_hp": 130,
-                        "engine_cylinders": 4,
-                        "engine_fuel_type": "regular unleaded",
-                        "transmission_type": "MANUAL",
-                        "driven_wheels": "rear wheel drive",
-                        "number_of_doors": 4,
-                        "market_category": "Luxury",
-                        "vehicle_size": "Compact",
-                        "vehicle_style": "Sedan",
-                        "highway_mpg": 26.0,
-                        "city_mpg": 18,
-                        "popularity": 617,
-                        "msrp": 2000.0,
-                        "fuel_consumption": 26.0  # Add fuel_consumption for the comparison table
-                    },
-                    "description": "The Mercedes-Benz 190-Class is a Sedan car.",
-                    "image_urls": [],
-                    "vehicle_type": "Sedan",
-                    "make": "Mercedes-Benz",
-                    "engine_fuel_type": "regular unleaded",
-                    "engine_hp": 130,
-                    "engine_cylinders": 4,
-                    "transmission_type": "MANUAL",
-                    "driven_wheels": "rear wheel drive",
-                    "number_of_doors": 4,
-                    "market_category": "Luxury",
-                    "vehicle_size": "Compact",
-                    "vehicle_style": "Sedan",
-                    "highway_mpg": 26.0,
-                    "city_mpg": 18,
-                    "popularity": 617,
-                    "msrp": 2000.0,
-                    "engine": "130 HP, 4 cylinders",
-                    "transmission": "MANUAL",
-                    "fuel_type": "regular unleaded",
-                    "fuel_consumption": 26.0,  # Add fuel_consumption for the comparison table
-                    "features": {
-                        "safety": "ABS, Airbags",
-                        "comfort": "Air Conditioning",
-                        "technology": "Bluetooth"
-                    },
-                    "pros": "Good value",
-                    "cons": "Basic features"
-                }
-
-            # Load CSV data
-            df = self.load_csv_data()
-
-            # Check if car_id is valid
-            if car_id < 1 or car_id > len(df):
-                logger.warning(f"Invalid car ID requested: {car_id}, max ID is {len(df)}")
-
-                # Try to get from database as fallback
-                async with self.session_factory() as session:
-                    # Get the car
-                    result = await session.execute(select(Car).where(Car.id == car_id))
-                    car = result.scalars().first()
-
-                    if not car:
-                        return None
-
-                    # Get the car specification
-                    spec_result = await session.execute(
-                        select(CarSpecification).where(CarSpecification.car_id == car.id)
-                    )
-                    spec = spec_result.scalars().first()
-
-                    # Extract vehicle_type from description
-                    vehicle_type = None
-                    if car.description:
-                        # The description format is typically "The {brand} {model} is a {vehicle_style} car."
-                        match = re.search(r'is a (.*?) car\.', car.description)
-                        if match:
-                            vehicle_type = match.group(1)
-
-                    # Parse engine details if available
-                    engine_hp = None
-                    engine_cylinders = None
-                    if spec and spec.engine:
-                        # Try to extract HP and cylinders from the engine string
-                        # Format is typically "X HP, Y cylinders"
-                        hp_match = re.search(r'(\d+)\s*HP', spec.engine)
-                        if hp_match:
-                            engine_hp = int(hp_match.group(1))
-
-                        cyl_match = re.search(r'(\d+)\s*cylinders', spec.engine)
-                        if cyl_match:
-                            engine_cylinders = int(cyl_match.group(1))
-
-                    # Create response dictionary with all detailed fields
-                    car_dict = {
-                        "id": car.id,
-                        "name": car.name,
-                        "brand": car.brand,
-                        "model": car.model,
-                        "year": car.year,
-                        "price": car.price,
-                        "condition": car.condition,
-                        "type": car.type,
-                        "description": car.description,
-                        "image_urls": [],
-                        "vehicle_type": vehicle_type,
-
-                        # Map brand to make for consistency
-                        "make": car.brand,
-
-                        # Add detailed specification fields
-                        "engine_fuel_type": spec.fuel_type if spec else None,
-                        "engine_hp": engine_hp,
-                        "engine_cylinders": engine_cylinders,
-                        "transmission_type": spec.transmission if spec else None,
-                        "driven_wheels": spec.driven_wheels if spec and hasattr(spec, 'driven_wheels') else None,
-                        "number_of_doors": spec.number_of_doors if spec and hasattr(spec, 'number_of_doors') else None,
-                        "market_category": spec.market_category if spec and hasattr(spec, 'market_category') else None,
-                        "vehicle_size": spec.vehicle_size if spec and hasattr(spec, 'vehicle_size') else None,
-                        "vehicle_style": spec.body_type if spec else vehicle_type,
-                        "highway_mpg": spec.mileage if spec else None,  # Using mileage as highway_mpg
-                        "city_mpg": spec.city_mpg if spec and hasattr(spec, 'city_mpg') else None,
-                        "popularity": spec.popularity if spec and hasattr(spec, 'popularity') else None,
-                        "msrp": car.price,  # Using price as MSRP if not available
-
-                        # Include the full specification object for backward compatibility
-                        "specifications": {
-                            "engine": spec.engine if spec else None,
-                            "transmission": spec.transmission if spec else None,
-                            "fuel_type": spec.fuel_type if spec else None,
-                            "mileage": float(spec.mileage) if spec and spec.mileage else None,
-                            "seating_capacity": spec.seating_capacity if spec else None,
-                            "body_type": spec.body_type if spec else None,
-                            # Add all the detailed fields to specifications as well
-                            "engine_hp": engine_hp,
-                            "engine_cylinders": engine_cylinders,
-                            "engine_fuel_type": spec.fuel_type if spec else None,
-                            "transmission_type": spec.transmission if spec else None,
-                            "driven_wheels": spec.driven_wheels if spec and hasattr(spec, 'driven_wheels') else None,
-                            "number_of_doors": spec.number_of_doors if spec and hasattr(spec, 'number_of_doors') else None,
-                            "market_category": spec.market_category if spec and hasattr(spec, 'market_category') else None,
-                            "vehicle_size": spec.vehicle_size if spec and hasattr(spec, 'vehicle_size') else None,
-                            "vehicle_style": spec.body_type if spec else vehicle_type,
-                            "highway_mpg": spec.mileage if spec else None,
-                            "city_mpg": spec.city_mpg if spec and hasattr(spec, 'city_mpg') else None,
-                            "popularity": spec.popularity if spec and hasattr(spec, 'popularity') else None,
-                            "msrp": car.price
-                        } if spec else None
-                    }
-
-                    return car_dict
-
-            # Get the row at index car_id - 1 (since DataFrame is 0-indexed)
-            try:
-                row = df.iloc[car_id - 1]
-                logger.info(f"Found car: {row['Make']} {row['Model']}")
-
-                # Convert row to car response
-                car_dict = self.convert_row_to_car_response(row, car_id)
                 return car_dict
-            except Exception as e:
-                logger.error(f"Error processing car ID {car_id}: {str(e)}")
-                return None
+
+            # Fallback for CSV data is removed as we want to use consistent IDs from the database
+            
         except Exception as e:
-            logger.error(f"Unexpected error in get_car_by_id: {str(e)}")
+            logger.error(f"Error getting car by ID {car_id}: {e}")
             return None
 
     async def _build_search_query(self, params: CarSearchParams):
@@ -783,254 +639,131 @@ class CarService:
                     total_pages=0
                 )
 
-    async def compare_cars(self, car_ids: List[int]) -> dict:
+    async def compare_cars(self, car_ids: List[str]) -> dict:
         """Get multiple cars for comparison with detailed information"""
-        # Handle special cases for Audi 100 (ID 17/18) and Mercedes-Benz 190-Class (ID 35/41)
         car_dicts = []
         specifications_dict = {}
 
-        for car_id in car_ids:
-            # Special case for Audi 100
-            if car_id == 17 or car_id == 18:
-                # Add car to car_dicts
-                car_dict = {
-                    "id": 17,  # Use ID 17 to match the chat suggestions
-                    "name": "Audi 100",
-                    "brand": "Audi",
-                    "model": "100",
-                    "year": 1992,
-                    "price": 2000.0,
-                    "condition": "new",
-                    "type": "buy",
-                    "description": "The Audi 100 is a Sedan car.",
-                    "image_urls": [],
-                    "vehicle_type": "Sedan",
-                    "make": "Audi",
-                    "engine_fuel_type": "regular unleaded",
-                    "engine_hp": 172,
-                    "engine_cylinders": 6,
-                    "transmission_type": "MANUAL",
-                    "driven_wheels": "front wheel drive",
-                    "number_of_doors": 4,
-                    "market_category": "Luxury",
-                    "vehicle_size": "Midsize",
-                    "vehicle_style": "Sedan",
-                    "highway_mpg": 24.0,
-                    "city_mpg": 17,
-                    "popularity": 3105,
-                    "msrp": 2000.0,
-                    "specifications": None  # Set to None as we'll use the new structure
-                }
-                car_dicts.append(car_dict)
+        # Get all cars from the database without special cases
+        async with self.session_factory() as session:
+            # Get cars by IDs
+            result = await session.execute(select(Car).where(Car.id.in_([int(car_id) for car_id in car_ids])))
+            cars = result.scalars().all()
 
-                # Add specifications to specifications_dict
-                specifications_dict[str(car_id)] = {
-                    "car_type": "Sedan",
-                    "year": 1992,
-                    "condition": "new",
-                    "seats": 5,
-                    "engine": "172 HP, 6 cylinders",
-                    "transmission": "MANUAL",
-                    "fuel_type": "regular unleaded",
-                    "fuel_consumption": 24.0,
-                    "engine_hp": 172,
-                    "engine_cylinders": 6,
-                    "engine_fuel_type": "regular unleaded",
-                    "transmission_type": "MANUAL",
-                    "driven_wheels": "front wheel drive",
-                    "number_of_doors": 4,
-                    "market_category": "Luxury",
-                    "vehicle_size": "Midsize",
-                    "vehicle_style": "Sedan",
-                    "highway_mpg": 24.0,
-                    "city_mpg": 17,
-                    "popularity": 3105,
-                    "msrp": 2000.0
-                }
-                continue
+            # Get specifications for these cars in a separate query
+            car_ids_found = [car.id for car in cars]
+            specs_result = await session.execute(
+                select(CarSpecification).where(CarSpecification.car_id.in_(car_ids_found))
+            )
+            specs = specs_result.scalars().all()
 
-            # Special case for Mercedes-Benz 190-Class
-            if car_id == 35 or car_id == 41:
-                # Add car to car_dicts
-                car_dict = {
-                    "id": 35,  # Use ID 35 to match the chat suggestions
-                    "name": "Mercedes-Benz 190-Class",
-                    "brand": "Mercedes-Benz",
-                    "model": "190-Class",
-                    "year": 1993,
-                    "price": 2000.0,
-                    "condition": "new",
-                    "type": "buy",
-                    "description": "The Mercedes-Benz 190-Class is a Sedan car.",
-                    "image_urls": [],
-                    "vehicle_type": "Sedan",
-                    "make": "Mercedes-Benz",
-                    "engine_fuel_type": "regular unleaded",
-                    "engine_hp": 130,
-                    "engine_cylinders": 4,
-                    "transmission_type": "MANUAL",
-                    "driven_wheels": "rear wheel drive",
-                    "number_of_doors": 4,
-                    "market_category": "Luxury",
-                    "vehicle_size": "Compact",
-                    "vehicle_style": "Sedan",
-                    "highway_mpg": 26.0,
-                    "city_mpg": 18,
-                    "popularity": 617,
-                    "msrp": 2000.0,
-                    "specifications": None  # Set to None as we'll use the new structure
-                }
-                car_dicts.append(car_dict)
+            # Create a mapping of car_id to specification
+            specs_by_car_id = {spec.car_id: spec for spec in specs}
 
-                # Add specifications to specifications_dict
-                specifications_dict[str(car_id)] = {
-                    "car_type": "Sedan",
-                    "year": 1993,
-                    "condition": "new",
-                    "seats": 5,
-                    "engine": "130 HP, 4 cylinders",
-                    "transmission": "MANUAL",
-                    "fuel_type": "regular unleaded",
-                    "fuel_consumption": 26.0,
-                    "engine_hp": 130,
-                    "engine_cylinders": 4,
-                    "engine_fuel_type": "regular unleaded",
-                    "transmission_type": "MANUAL",
-                    "driven_wheels": "rear wheel drive",
-                    "number_of_doors": 4,
-                    "market_category": "Luxury",
-                    "vehicle_size": "Compact",
-                    "vehicle_style": "Sedan",
-                    "highway_mpg": 26.0,
-                    "city_mpg": 18,
-                    "popularity": 617,
-                    "msrp": 2000.0
-                }
-                continue
+            for car in cars:
+                # Extract vehicle_type from description
+                vehicle_type = None
+                if car.description:
+                    # The description format is typically "The {brand} {model} is a {vehicle_style} car."
+                    match = re.search(r'is a (.*?) car\.', car.description)
+                    if match:
+                        vehicle_type = match.group(1)
 
-        # For non-special case cars, query the database
-        remaining_car_ids = [car_id for car_id in car_ids if car_id not in [17, 18, 35, 41]]
+                # Get specification for this car
+                spec = specs_by_car_id.get(car.id)
 
-        if remaining_car_ids:
-            async with self.session_factory() as session:
-                # Get cars by IDs
-                result = await session.execute(select(Car).where(Car.id.in_(remaining_car_ids)))
-                cars = result.scalars().all()
+                # Parse engine details if available
+                engine_hp = None
+                engine_cylinders = None
+                if spec and spec.engine:
+                    # Try to extract HP and cylinders from the engine string
+                    # Format is typically "X HP, Y cylinders"
+                    hp_match = re.search(r'(\d+)\s*HP', spec.engine)
+                    if hp_match:
+                        engine_hp = int(hp_match.group(1))
 
-                # Get specifications for these cars in a separate query
-                car_ids_found = [car.id for car in cars]
-                specs_result = await session.execute(
-                    select(CarSpecification).where(CarSpecification.car_id.in_(car_ids_found))
-                )
-                specs = specs_result.scalars().all()
+                    cyl_match = re.search(r'(\d+)\s*cylinders', spec.engine)
+                    if cyl_match:
+                        engine_cylinders = int(cyl_match.group(1))
 
-                # Create a mapping of car_id to specification
-                specs_by_car_id = {spec.car_id: spec for spec in specs}
-
-                for car in cars:
-                    # Extract vehicle_type from description
-                    vehicle_type = None
-                    if car.description:
-                        # The description format is typically "The {brand} {model} is a {vehicle_style} car."
-                        match = re.search(r'is a (.*?) car\.', car.description)
-                        if match:
-                            vehicle_type = match.group(1)
-
-                    # Get specification for this car
-                    spec = specs_by_car_id.get(car.id)
-
-                    # Parse engine details if available
-                    engine_hp = None
-                    engine_cylinders = None
-                    if spec and spec.engine:
-                        # Try to extract HP and cylinders from the engine string
-                        # Format is typically "X HP, Y cylinders"
-                        hp_match = re.search(r'(\d+)\s*HP', spec.engine)
-                        if hp_match:
-                            engine_hp = int(hp_match.group(1))
-
-                        cyl_match = re.search(r'(\d+)\s*cylinders', spec.engine)
-                        if cyl_match:
-                            engine_cylinders = int(cyl_match.group(1))
-
-                    # Create specification dictionary for the car
-                    car_specs = {}
-                    if spec:
-                        car_specs = {
-                            "car_type": vehicle_type,
-                            "year": car.year,
-                            "condition": car.condition,
-                            "seats": spec.seating_capacity,
-                            "engine": spec.engine,
-                            "transmission": spec.transmission,
-                            "fuel_type": spec.fuel_type,
-                            "fuel_consumption": float(spec.mileage) if spec.mileage else None,
-                            "engine_hp": engine_hp,
-                            "engine_cylinders": engine_cylinders,
-                            "engine_fuel_type": spec.fuel_type,
-                            "transmission_type": spec.transmission,
-                            "driven_wheels": spec.driven_wheels if hasattr(spec, 'driven_wheels') else None,
-                            "number_of_doors": spec.number_of_doors if hasattr(spec, 'number_of_doors') else None,
-                            "market_category": spec.market_category if hasattr(spec, 'market_category') else None,
-                            "vehicle_size": spec.vehicle_size if hasattr(spec, 'vehicle_size') else None,
-                            "vehicle_style": spec.body_type if spec.body_type else vehicle_type,
-                            "highway_mpg": float(spec.mileage) if spec.mileage else None,
-                            "city_mpg": spec.city_mpg if hasattr(spec, 'city_mpg') else None,
-                            "popularity": spec.popularity if hasattr(spec, 'popularity') else None,
-                            "msrp": car.price
-                        }
-                    else:
-                        # Provide default values if no specifications are found
-                        car_specs = {
-                            "car_type": vehicle_type,
-                            "year": car.year,
-                            "condition": car.condition,
-                            "seats": 5,
-                            "engine": "Unknown",
-                            "transmission": "Unknown",
-                            "fuel_type": "Unknown",
-                            "fuel_consumption": None
-                        }
-
-                    # Add this car's specifications to the specifications dictionary
-                    specifications_dict[str(car.id)] = car_specs
-
-                    # Create response dictionary with all detailed fields
-                    car_dict = {
-                        "id": car.id,
-                        "name": car.name,
-                        "brand": car.brand,
-                        "model": car.model,
+                # Create specification dictionary for the car
+                car_specs = {}
+                if spec:
+                    car_specs = {
+                        "car_type": vehicle_type,
                         "year": car.year,
-                        "price": car.price,
                         "condition": car.condition,
-                        "type": car.type,
-                        "description": car.description,
-                        "image_urls": [],
-                        "vehicle_type": vehicle_type,
-
-                        # Map brand to make for consistency
-                        "make": car.brand,
-
-                        # Add detailed specification fields
-                        "engine_fuel_type": spec.fuel_type if spec else None,
+                        "seats": spec.seating_capacity,
+                        "engine": spec.engine,
+                        "transmission": spec.transmission,
+                        "fuel_type": spec.fuel_type,
+                        "fuel_consumption": float(spec.mileage) if spec.mileage else None,
                         "engine_hp": engine_hp,
                         "engine_cylinders": engine_cylinders,
-                        "transmission_type": spec.transmission if spec else None,
-                        "driven_wheels": spec.driven_wheels if spec and hasattr(spec, 'driven_wheels') else None,
-                        "number_of_doors": spec.number_of_doors if spec and hasattr(spec, 'number_of_doors') else None,
-                        "market_category": spec.market_category if spec and hasattr(spec, 'market_category') else None,
-                        "vehicle_size": spec.vehicle_size if spec and hasattr(spec, 'vehicle_size') else None,
-                        "vehicle_style": spec.body_type if spec else vehicle_type,
-                        "highway_mpg": spec.mileage if spec else None,  # Using mileage as highway_mpg
-                        "city_mpg": spec.city_mpg if spec and hasattr(spec, 'city_mpg') else None,
-                        "popularity": spec.popularity if spec and hasattr(spec, 'popularity') else None,
-                        "msrp": car.price,  # Using price as MSRP if not available
-
-                        # Include the full specification object for backward compatibility
-                        "specifications": None  # Set to None as we'll use the new structure
+                        "engine_fuel_type": spec.fuel_type,
+                        "transmission_type": spec.transmission,
+                        "driven_wheels": spec.driven_wheels if hasattr(spec, 'driven_wheels') else None,
+                        "number_of_doors": spec.number_of_doors if hasattr(spec, 'number_of_doors') else None,
+                        "market_category": spec.market_category if hasattr(spec, 'market_category') else None,
+                        "vehicle_size": spec.vehicle_size if hasattr(spec, 'vehicle_size') else None,
+                        "vehicle_style": spec.body_type if spec.body_type else vehicle_type,
+                        "highway_mpg": float(spec.mileage) if spec.mileage else None,
+                        "city_mpg": spec.city_mpg if hasattr(spec, 'city_mpg') else None,
+                        "popularity": spec.popularity if hasattr(spec, 'popularity') else None,
+                        "msrp": car.price
                     }
-                    car_dicts.append(car_dict)
+                else:
+                    # Provide default values if no specifications are found
+                    car_specs = {
+                        "car_type": vehicle_type,
+                        "year": car.year,
+                        "condition": car.condition,
+                        "seats": 5,
+                        "engine": "Unknown",
+                        "transmission": "Unknown",
+                        "fuel_type": "Unknown",
+                        "fuel_consumption": None
+                    }
+
+                # Add this car's specifications to the specifications dictionary
+                specifications_dict[str(car.id)] = car_specs
+
+                # Create response dictionary with all detailed fields
+                car_dict = {
+                    "id": car.id,
+                    "name": car.name,
+                    "brand": car.brand,
+                    "model": car.model,
+                    "year": car.year,
+                    "price": car.price,
+                    "condition": car.condition,
+                    "type": car.type,
+                    "description": car.description,
+                    "image_urls": [],
+                    "vehicle_type": vehicle_type,
+
+                    # Map brand to make for consistency
+                    "make": car.brand,
+
+                    # Add detailed specification fields
+                    "engine_fuel_type": spec.fuel_type if spec else None,
+                    "engine_hp": engine_hp,
+                    "engine_cylinders": engine_cylinders,
+                    "transmission_type": spec.transmission if spec else None,
+                    "driven_wheels": spec.driven_wheels if spec and hasattr(spec, 'driven_wheels') else None,
+                    "number_of_doors": spec.number_of_doors if spec and hasattr(spec, 'number_of_doors') else None,
+                    "market_category": spec.market_category if spec and hasattr(spec, 'market_category') else None,
+                    "vehicle_size": spec.vehicle_size if spec and hasattr(spec, 'vehicle_size') else None,
+                    "vehicle_style": spec.body_type if spec else vehicle_type,
+                    "highway_mpg": spec.mileage if spec else None,  # Using mileage as highway_mpg
+                    "city_mpg": spec.city_mpg if spec and hasattr(spec, 'city_mpg') else None,
+                    "popularity": spec.popularity if spec and hasattr(spec, 'popularity') else None,
+                    "msrp": car.price,  # Using price as MSRP if not available
+
+                    # Include the full specification object for backward compatibility
+                    "specifications": None  # Set to None as we'll use the new structure
+                }
+                car_dicts.append(car_dict)
 
         # Create the new response structure with a dedicated specifications section
         response = {

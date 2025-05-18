@@ -176,14 +176,16 @@ async def compare_cars(
             detail="You must provide car_ids in the request body"
         )
 
-    # Convert string IDs to integers if needed
+    # Ensure all IDs are valid and convert to string for consistency
     car_ids = []
     for car_id in car_ids_raw:
         try:
+            # Validate ID by attempting to convert to int, but keep as string for consistency
             if isinstance(car_id, str):
-                car_ids.append(int(car_id))
+                int(car_id)  # Just to validate it's a valid number
+                car_ids.append(str(car_id))
             else:
-                car_ids.append(car_id)
+                car_ids.append(str(car_id))
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
