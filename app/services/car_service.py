@@ -774,116 +774,114 @@ class CarService:
         return response
 
     async def search_cars_from_csv(self, make=None, model=None, year=None, min_price=None, max_price=None,
-                            vehicle_style=None, search_query=None, page=1, page_size=20, sort_by=None,
-                            sort_direction="asc", partial_match=False):
-        """Search for cars in the CSV file with pagination and sorting"""
+                                 vehicle_style=None, search_query=None, page=1, page_size=10,
+                                 sort_by=None, sort_direction='asc', partial_match=False):
+        """
+        Search cars from CSV data with filters
+        """
         try:
-            logger.info(f"Searching cars with filters: make={make}, model={model}, year={year}, "
-                       f"min_price={min_price}, max_price={max_price}, vehicle_style={vehicle_style}, "
-                       f"search_query={search_query}, page={page}, page_size={page_size}, "
-                       f"sort_by={sort_by}, sort_direction={sort_direction}, partial_match={partial_match}")
-
-            df = self.load_csv_data()
-            original_count = len(df)
-
-            # Apply general search query if provided
-            if search_query:
-                # Create a combined search mask across multiple fields
-                search_mask = pd.Series(False, index=df.index)
-
-                # Search in Make field
-                if "Make" in df.columns:
-                    search_mask = search_mask | df["Make"].astype(str).str.contains(search_query, case=False)
-
-                # Search in Model field
-                if "Model" in df.columns:
-                    search_mask = search_mask | df["Model"].astype(str).str.contains(search_query, case=False)
-
-                # Search in Vehicle Style field
-                if "Vehicle Style" in df.columns:
-                    search_mask = search_mask | df["Vehicle Style"].astype(str).str.contains(search_query, case=False)
-
-                # Search in Market Category field
-                if "Market Category" in df.columns:
-                    search_mask = search_mask | df["Market Category"].astype(str).str.contains(search_query, case=False)
-
-                # Apply the combined search mask
-                df = df[search_mask]
-                logger.info(f"Search query '{search_query}' matched {len(df)} cars")
-
-            # Apply specific filters with case-insensitive comparisons
+            # Load CSV data
+            df = pd.read_csv('data/cars_data.csv')
+            
+            # Create a mask for filtering
+            mask = pd.Series(True, index=df.index)
+            
+            # Apply filters
             if make:
-                df = df[df["Make"].str.contains(make, case=False)]
+                if partial_match:
+                    mask &= df['Make'].str.lower().fillna('').str.contains(make.lower(), na=False)
+                else:
+                    mask &= df['Make'].str.lower().fillna('') == make.lower()
+                    
             if model:
-                df = df[df["Model"].str.contains(model, case=False)]
+                if partial_match:
+                    # For partial match, try different variations of the model name
+                    model_variations = [
+                        model.lower(),
+                        model.lower().replace(' ', ''),
+                        model.lower().replace(' ', '-'),
+                        model.lower().replace('-', ' '),
+                        model.lower().replace('series', '').strip(),
+                        model.lower().replace('class', '').strip()
+                    ]
+                    model_mask = pd.Series(False, index=df.index)
+                    for variation in model_variations:
+                        model_mask |= df['Model'].str.lower().fillna('').str.contains(variation, na=False)
+                    mask &= model_mask
+                else:
+                    # For exact match, try different variations
+                    model_variations = [
+                        model.lower(),
+                        model.lower().replace(' ', ''),
+                        model.lower().replace(' ', '-'),
+                        model.lower().replace('-', ' '),
+                        model.lower().replace('series', '').strip(),
+                        model.lower().replace('class', '').strip()
+                    ]
+                    model_mask = pd.Series(False, index=df.index)
+                    for variation in model_variations:
+                        model_mask |= df['Model'].str.lower().fillna('') == variation
+                    mask &= model_mask
+                    
             if year:
-                df = df[df["Year"] == year]
-            if min_price and "MSRP" in df.columns:
-                df = df[df["MSRP"] >= min_price]
-            if max_price and "MSRP" in df.columns:
-                df = df[df["MSRP"] <= max_price]
+                mask &= df['Year'].fillna(0) == year
+                
+            if min_price:
+                mask &= df['MSRP'].fillna(0) >= min_price
+                
+            if max_price:
+                mask &= df['MSRP'].fillna(0) <= max_price
+                
             if vehicle_style:
-                # Handle case where Vehicle Style column might not exist or have NaN values
-                if "Vehicle Style" in df.columns:
-                    # Convert to string to handle potential non-string values
-                    df = df[df["Vehicle Style"].astype(str).str.contains(vehicle_style, case=False)]
-
-            filtered_count = len(df)
-            logger.info(f"Filtered from {original_count} to {filtered_count} cars")
-
-            # Apply sorting
-            if sort_by and sort_by in df.columns:
-                ascending = sort_direction.lower() != "desc"
-                df = df.sort_values(by=sort_by, ascending=ascending)
-                logger.info(f"Sorted by {sort_by} in {'ascending' if ascending else 'descending'} order")
-
+                if partial_match:
+                    mask &= df['Vehicle Style'].str.lower().fillna('').str.contains(vehicle_style.lower(), na=False)
+                else:
+                    mask &= df['Vehicle Style'].str.lower().fillna('') == vehicle_style.lower()
+                    
+            if search_query:
+                search_query = search_query.lower()
+                search_mask = (
+                    df['Make'].str.lower().fillna('').str.contains(search_query, na=False) |
+                    df['Model'].str.lower().fillna('').str.contains(search_query, na=False) |
+                    df['Vehicle Style'].str.lower().fillna('').str.contains(search_query, na=False)
+                )
+                mask &= search_mask
+            
+            # Apply the mask
+            filtered_df = df[mask]
+            
+            # Sort if specified
+            if sort_by:
+                if sort_by in df.columns:
+                    filtered_df = filtered_df.sort_values(by=sort_by, ascending=(sort_direction == 'asc'))
+            
             # Calculate pagination
-            total_items = len(df)
-            total_pages = (total_items + page_size - 1) // page_size if total_items > 0 else 0
-
-            # Validate page number
-            if page < 1:
-                page = 1
-            elif page > total_pages and total_pages > 0:
-                page = total_pages
-
-            # Apply pagination
+            total = len(filtered_df)
             start_idx = (page - 1) * page_size
-            end_idx = min(start_idx + page_size, total_items)
-
-            # Get paginated data
-            paginated_df = df.iloc[start_idx:end_idx]
-            logger.info(f"Returning page {page} of {total_pages} (items {start_idx+1}-{end_idx} of {total_items})")
-
-            # Convert filtered DataFrame to list of dictionaries
-            cars = []
-            for idx, row in paginated_df.iterrows():
-                try:
-                    car_dict = self.convert_row_to_car_response(row)
-                    cars.append(car_dict)
-                except Exception as e:
-                    logger.error(f"Error processing row {idx}: {e}")
-                    continue
-
-            # Return paginated response
+            end_idx = start_idx + page_size
+            
+            # Get paginated results
+            paginated_df = filtered_df.iloc[start_idx:end_idx]
+            
+            # Convert to list of dictionaries
+            items = paginated_df.to_dict('records')
+            
             return {
-                "items": cars,
-                "total": total_items,
+                "items": items,
+                "total": total,
                 "page": page,
                 "page_size": page_size,
-                "total_pages": total_pages
+                "total_pages": (total + page_size - 1) // page_size
             }
-
+            
         except Exception as e:
-            logger.error(f"Error in search_cars_from_csv: {str(e)}")
-            # Return empty response in case of error
+            logger.error(f"Error in search_cars_from_csv: {e}")
             return {
                 "items": [],
                 "total": 0,
                 "page": page,
                 "page_size": page_size,
-                "total_pages": 0,
-                "error": str(e)
+                "total_pages": 0
             }
 
     async def get_filter_options(self) -> dict:
