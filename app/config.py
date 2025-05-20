@@ -32,7 +32,7 @@ class Settings(BaseSettings):
 
     # LLM settings
     LLM_TYPE: str = "openai"
-    LLM_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
     LLM_MODEL: str = "gpt-3.5-turbo"
 
     # Vector DB settings
@@ -105,6 +105,12 @@ class Settings(BaseSettings):
 
         self.STT_PROVIDER = os.getenv("STT_PROVIDER", self.STT_PROVIDER)
         self.STT_API_KEY = os.getenv("STT_API_KEY", self.STT_API_KEY)
+
+        # Get OpenAI API key from environment
+        self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", self.OPENAI_API_KEY)
+        # Set LLM_TYPE to openai if OPENAI_API_KEY is present
+        if self.OPENAI_API_KEY:
+            self.LLM_TYPE = "openai"
 
         # Get Gemini API key from environment
         self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", self.GEMINI_API_KEY)

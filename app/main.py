@@ -6,6 +6,10 @@ from app.core.logging import logger
 from app.core.monitoring import MonitoringMiddleware
 import logging
 import uvicorn
+from app.config import settings
+import asyncio
+from contextlib import asynccontextmanager
+import signal
 
 # Configure logging
 logging.basicConfig(
@@ -13,42 +17,16 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
-app = FastAPI(
-    title="Car Rental API",
-    description="API for car rental management system",
-    version="1.0.0",
-    docs_url="/docs",  # Enable Swagger UI at /docs
-)
+# Global flag for graceful shutdown
+shutdown_event = asyncio.Event()
 
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Add monitoring middleware
-app.add_middleware(MonitoringMiddleware)
-
-# Include routers
-app.include_router(cars.router, prefix="/api/cars", tags=["cars"])
-app.include_router(users.router, prefix="/api/users", tags=["users"])
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
-# CSV data API has been consolidated into the cars API
-app.include_router(monitoring.router, prefix="/api/monitoring", tags=["monitoring"])
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     logger.info("Starting up application...")
-
-    # Initialize database connection with error handling
     try:
-        logger.info("Initializing database connection...")
+        # Initialize any resources here
         await mysql.connect()
-
         # Create database tables
         from app.core.database import Base, engine
         # Import all models to register them with SQLAlchemy
@@ -68,16 +46,71 @@ async def startup():
             logger.warning("Application will continue without database tables")
 
         logger.info("Database connection established successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize SQL service: {str(e)}")
-        logger.warning("SQL service will be unavailable, but the application will continue to run.")
+        yield
+    finally:
+        # Shutdown
+        logger.info("Shutting down application...")
+        try:
+            # Set shutdown event
+            shutdown_event.set()
+            
+            # Wait for a short time to allow ongoing requests to complete
+            await asyncio.sleep(1)
+            
+            # Cleanup database connection
+            await mysql.disconnect()
+            logger.info("Database connection closed successfully")
+            
+            # Cancel remaining tasks
+            tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+            if tasks:
+                for task in tasks:
+                    task.cancel()
+                try:
+                    await asyncio.wait(tasks, timeout=2.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Some tasks did not complete in time")
+                except Exception as e:
+                    logger.error(f"Error during task cleanup: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {str(e)}")
 
-@app.on_event("shutdown")
-async def shutdown():
-    logger.info("Shutting down application...")
-    logger.info("Closing database connection...")
-    await mysql.disconnect()
-    logger.info("Database connection closed successfully")
+def handle_sigterm(signum, frame):
+    """Handle SIGTERM signal"""
+    logger.info("Received SIGTERM signal")
+    if not shutdown_event.is_set():
+        shutdown_event.set()
+
+# Register signal handlers
+signal.signal(signal.SIGTERM, handle_sigterm)
+signal.signal(signal.SIGINT, handle_sigterm)
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    description="API for car rental management system",
+    version="1.0.0",
+    docs_url="/docs",  # Enable Swagger UI at /docs
+    lifespan=lifespan
+)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Add monitoring middleware
+app.add_middleware(MonitoringMiddleware)
+
+# Include routers with explicit paths
+app.include_router(cars.router, prefix=f"{settings.API_PREFIX}/cars", tags=["Cars"])
+app.include_router(users.router, prefix=f"{settings.API_PREFIX}/users", tags=["Users"])
+app.include_router(auth.router, prefix=f"{settings.API_PREFIX}/auth", tags=["Authentication"])
+app.include_router(chat.router, prefix=f"{settings.API_PREFIX}/chat", tags=["Chat"])
+app.include_router(monitoring.router, prefix=f"{settings.API_PREFIX}/monitoring", tags=["Monitoring"])
 
 @app.get("/")
 async def root():
@@ -91,4 +124,12 @@ async def health():
 
 if __name__ == "__main__":
     logger.info("Starting development server...")
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info",
+        timeout_keep_alive=30,
+        timeout_graceful_shutdown=10
+    )

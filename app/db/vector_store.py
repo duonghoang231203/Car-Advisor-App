@@ -14,7 +14,7 @@ class VectorDB:
     def initialize(self):
         # Initialize embeddings
         if settings.LLM_TYPE == "openai":
-            self.embeddings = OpenAIEmbeddings(openai_api_key=settings.LLM_API_KEY)
+            self.embeddings = OpenAIEmbeddings(openai_api_key=settings.OPENAI_API_KEY)
         else:
             # Default to a good open-source embedding model
             self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")

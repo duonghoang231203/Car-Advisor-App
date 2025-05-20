@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from app.models.chat import ChatRequest, ChatResponse, ChatSession, Message
-from app.services.rag_service import rag_service
+from app.services.function_calling_service import function_calling_service
 from app.services.speech_service import speech_service
 # Authentication removed
 # from app.core.security import oauth2_scheme
@@ -40,16 +40,16 @@ async def send_message(
         user_message = Message(role="user", content=chat_request.message)
         session.messages.append(user_message)
 
-        # Process query with RAG, including conversation history
+        # Process query with function calling service
         # Only pass the last 5 messages to avoid context window limitations
         conversation_history = session.messages[-5:] if len(session.messages) > 0 else []
-        rag_result = await rag_service.process_query(
+        result = await function_calling_service.process_query(
             query=chat_request.message,
             conversation_history=conversation_history
         )
 
         # Add assistant message to session
-        assistant_message = Message(role="assistant", content=rag_result["response"])
+        assistant_message = Message(role="assistant", content=result["response"])
         session.messages.append(assistant_message)
 
         # Update session in memory
@@ -58,9 +58,9 @@ async def send_message(
 
         # Prepare response
         response = ChatResponse(
-            response=rag_result["response"],
-            suggestions=rag_result["suggestions"] if "suggestions" in rag_result else [],
-            explanation=rag_result["explanation"] if "explanation" in rag_result else "",
+            response=result["response"],
+            suggestions=result["suggestions"] if "suggestions" in result else [],
+            explanation=result["explanation"] if "explanation" in result else "",
             session_id=str(session.id)
         )
         return response

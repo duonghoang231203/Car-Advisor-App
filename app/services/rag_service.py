@@ -49,7 +49,7 @@ class RAGService:
             if settings.LLM_TYPE == "openai":
                 self.llm = ChatOpenAI(
                     model_name=settings.LLM_MODEL,
-                    openai_api_key=settings.LLM_API_KEY,
+                    openai_api_key=settings.OPENAI_API_KEY,
                     temperature=0.7
                 )
 
@@ -57,7 +57,7 @@ class RAGService:
                 # for generating more varied responses
                 self.creative_llm = ChatOpenAI(
                     model_name=settings.LLM_MODEL,
-                    openai_api_key=settings.LLM_API_KEY,
+                    openai_api_key=settings.OPENAI_API_KEY,
                     temperature=0.9
                 )
             else:
@@ -388,25 +388,25 @@ class RAGService:
             # Step 4: Clean up extracted cars - remove invalid car models
             cleaned_cars = []
             invalid_models = ["safety", "sensing", "sense", "eyesight", "shield", "sync", "carplay", "android", "connect"]
-            
+
             for car in extracted_cars:
                 # Skip models that are actually safety features or technology packages
                 if car['model'].lower() in invalid_models:
                     logger.info(f"Skipping non-car model: {car['name']}")
                     continue
-                
+
                 # Add to cleaned list
                 cleaned_cars.append(car)
-            
+
             # Filter out duplicates by name
             unique_car_names = set()
             filtered_cars = []
-            
+
             for car in cleaned_cars:
                 if car['name'].lower() not in unique_car_names:
                     unique_car_names.add(car['name'].lower())
                     filtered_cars.append(car)
-            
+
             # Step 5: Look up these cars in the database and build suggestions
             suggestions = []
             used_names = set()  # Track used names to ensure uniqueness
@@ -455,21 +455,22 @@ class RAGService:
                     logger.warning(f"No valid car data found for {car['name']}")
 
             # If we don't have enough suggestions, create synthetic suggestions from extracted cars
-            if len(suggestions) < min(3, len(filtered_cars)):
+            # Ensure we have at least 3 suggestions, but try to get up to 6 for better diversity
+            if len(suggestions) < min(6, max(3, len(filtered_cars))):
                 logger.info(f"Not enough suggestions from database ({len(suggestions)}), creating synthetic suggestions")
-                
+
                 # Get details about car type, price range, etc.
                 vehicle_type = self._get_vehicle_type_from_query(query)
-                
+
                 # Create synthetic suggestions for cars not found in database
                 for car in filtered_cars:
                     # Skip if we already have this car in suggestions
                     if car['name'] in used_names:
                         continue
-                    
+
                     # Generate reasonable price based on brand and vehicle type
                     price = self._estimate_car_price(car['brand'], car['model'], vehicle_type)
-                    
+
                     # Create a suggestion
                     car_suggestion = CarSuggestion(
                         id=f"synthetic_{len(suggestions)}",
@@ -480,16 +481,31 @@ class RAGService:
                         image_url=None,
                         reasons=[f"Recommended {vehicle_type}"]
                     )
-                    
+
                     # Convert to dict
                     suggestion_dict = car_suggestion.model_dump()
-                    
+
                     suggestions.append(suggestion_dict)
                     used_names.add(car['name'])
-                    
-                    # Stop when we have enough
-                    if len(suggestions) >= 3:
+
+                    # Stop when we have enough (aim for 6 suggestions)
+                    if len(suggestions) >= 6:
                         break
+
+                # If we still don't have enough suggestions, try to get fallback suggestions
+                if len(suggestions) < 3:
+                    logger.info(f"Still not enough suggestions ({len(suggestions)}), getting fallback suggestions")
+                    fallback_suggestions = await self._get_fallback_suggestions(query, explanation, False)
+
+                    # Add fallback suggestions that aren't already in our list
+                    for suggestion in fallback_suggestions:
+                        suggestion_name = suggestion.get('name', '').lower()
+                        if suggestion_name and suggestion_name not in [s.get('name', '').lower() for s in suggestions]:
+                            suggestions.append(suggestion)
+
+                            # Stop when we have enough
+                            if len(suggestions) >= 6:
+                                break
 
             # Step 6: Generate response based on explanation and suggestions
             response_prompt = f"""
@@ -534,24 +550,24 @@ class RAGService:
                 "suggestions": [],
                 "explanation": "Error processing query."
             }
-            
+
     def _get_vehicle_type_from_query(self, query):
         """
         Extract the vehicle type from the query
-        
+
         Args:
             query: User query
-            
+
         Returns:
             String with vehicle type
         """
         query_lower = query.lower()
-        
+
         # Check for specific vehicle types
         if any(term in query_lower for term in ["suv", "crossover", "family vehicle"]):
             return "SUV"
         elif any(term in query_lower for term in ["sedan", "saloon", "four door"]):
-            return "Sedan"  
+            return "Sedan"
         elif any(term in query_lower for term in ["coupe", "sports car", "two door"]):
             return "Coupe"
         elif any(term in query_lower for term in ["truck", "pickup"]):
@@ -564,19 +580,19 @@ class RAGService:
             return "Minivan"
         elif any(term in query_lower for term in ["hatchback", "hot hatch"]):
             return "Hatchback"
-            
+
         # Default to SUV if nothing specific found
         return "SUV"
-        
+
     def _estimate_car_price(self, brand, model, vehicle_type):
         """
         Estimate a reasonable price for a car based on brand, model and vehicle type
-        
+
         Args:
             brand: Car brand
             model: Car model
             vehicle_type: Type of vehicle
-            
+
         Returns:
             Estimated price
         """
@@ -591,7 +607,7 @@ class RAGService:
             "Minivan": 35000,
             "Hatchback": 25000
         }
-        
+
         # Brand price factors (premium brands cost more)
         brand_factors = {
             "toyota": 1.0,
@@ -619,22 +635,22 @@ class RAGService:
             "cadillac": 1.6,
             "lincoln": 1.6
         }
-        
+
         # Get the base price for this vehicle type (default to SUV if not found)
         base_price = base_prices.get(vehicle_type, base_prices["SUV"])
-        
+
         # Get the brand factor (default to 1.0 if brand not in our list)
         brand_factor = brand_factors.get(brand.lower(), 1.0)
-        
+
         # Calculate estimated price
         estimated_price = base_price * brand_factor
-        
+
         # Adjust for specific models that are known to be more expensive
         if "hybrid" in model.lower() or "plug-in" in model.lower():
             estimated_price *= 1.15  # Hybrid models typically cost more
         elif "electric" in model.lower() or "ev" in model.lower():
             estimated_price *= 1.3   # Electric vehicles cost more
-            
+
         # Round to nearest $1000
         return round(estimated_price / 1000) * 1000
 
@@ -743,7 +759,7 @@ class RAGService:
             from app.db.models import Car, CarSpecification
             from app.core.database import SessionLocal
             from sqlalchemy import select
-            
+
             # Convert car_id to integer if possible
             if isinstance(car_id, str):
                 try:
@@ -753,7 +769,7 @@ class RAGService:
                     return None
 
             logger.info(f"Fetching car with ID {car_id}")
-            
+
             # Use database session
             async with SessionLocal() as session:
                 # Query the car
@@ -804,7 +820,7 @@ class RAGService:
                     })
 
                 return car_dict
-                
+
         except Exception as e:
             logger.error(f"Error getting car data for ID {car_id}: {e}")
             return None
@@ -907,14 +923,14 @@ class RAGService:
                 try:
                     search_results = await self.car_service.search_cars_from_csv(**strategy)
                     strategy_cars = search_results.get("items", [])
-                    
+
                     if strategy_cars:
                         # Add new cars to our list, avoiding duplicates
                         for car in strategy_cars:
                             car_id = car.get("id")
                             if car_id and not any(c.get("id") == car_id for c in cars):
                                 cars.append(car)
-                        
+
                         # If we have enough cars, stop searching
                         if len(cars) >= 15:
                             break
@@ -929,7 +945,7 @@ class RAGService:
             # Track brands and models to ensure diversity
             selected_brands = set()
             selected_models = set()
-            max_suggestions = 6  # Increased from 3 to 6
+            max_suggestions = 6  # Always aim for 6 suggestions for better user experience
 
             # First pass: try to get diverse options by brand and model
             for car in cars:
@@ -1193,20 +1209,20 @@ class RAGService:
                     Car.brand.ilike(f"%{brand}%") &
                     or_(*[Car.model.ilike(f"%{var}%") for var in model_variations])
                 ).limit(5)
-                
+
                 result = await session.execute(query)
                 cars = result.scalars().all()
-                
+
                 if cars:
                     # Found cars in database
                     car = cars[0]  # Take the first match
                     logger.info(f"Found car in database: {car.brand} {car.model}")
-                    
+
                     # Get specifications
                     spec_query = select(CarSpecification).where(CarSpecification.car_id == car.id)
                     spec_result = await session.execute(spec_query)
                     spec = spec_result.scalars().first()
-                    
+
                     # Create car data dictionary
                     car_data = {
                         "id": car.id,
@@ -1217,7 +1233,7 @@ class RAGService:
                         "Vehicle Style": spec.vehicle_style if spec and spec.vehicle_style else spec.body_type if spec else None,
                         "Market Category": spec.market_category if spec and spec.market_category else "Standard"
                     }
-                    
+
                     # Add additional fields from specification if available
                     if spec:
                         car_data.update({
@@ -1232,15 +1248,15 @@ class RAGService:
                             "city mpg": spec.city_mpg,
                             "Popularity": spec.popularity
                         })
-                    
+
                     return car_data
-            
+
             # If direct database lookup failed, try search_cars API
             logger.info(f"Direct database lookup failed, trying search_cars_from_csv API")
-            
+
             # Handle brand name variations
             brand_variations = [brand]
-            
+
             # Special case for Mercedes vs Mercedes-Benz
             if brand.lower() == "mercedes":
                 brand_variations.extend(["mercedes-benz", "mercedesbenz"])
@@ -1248,11 +1264,11 @@ class RAGService:
                 brand_variations.extend(["mercedes-benz", "mercedesbenz", "mercedes"])
             elif brand.lower() == "mercedes-benz":
                 brand_variations.extend(["mercedes", "mercedesbenz"])
-                
+
             # Add retry logic
             max_retries = 3
             retry_delay = 1  # seconds
-            
+
             for attempt in range(max_retries):
                 try:
                     # Try with make/model search
@@ -1265,30 +1281,30 @@ class RAGService:
                                 "page_size": 10,
                                 "partial_match": True  # Use partial matching
                             }
-                            
+
                             # Get cars
                             search_results = await self.car_service.search_cars_from_csv(**search_params)
                             cars = search_results.get("items", [])
-                            
+
                             if cars and len(cars) > 0:
                                 logger.info(f"Found car with search API: {cars[0].get('Make', '')} {cars[0].get('Model', '')}")
                                 return cars[0]
-                    
+
                     # If not found, try with just the brand
                     for brand_var in brand_variations:
                         search_params = {
                             "make": brand_var,
-                            "page": 1, 
+                            "page": 1,
                             "page_size": 10
                         }
-                        
+
                         search_results = await self.car_service.search_cars_from_csv(**search_params)
                         cars = search_results.get("items", [])
-                        
+
                         if cars and len(cars) > 0:
                             logger.info(f"Found car with brand-only search: {cars[0].get('Make', '')} {cars[0].get('Model', '')}")
                             return cars[0]
-                    
+
                     # If we get here, retry
                     if attempt < max_retries - 1:
                         logger.info(f"Retry attempt {attempt + 1} for {brand} {model}")
@@ -1296,14 +1312,14 @@ class RAGService:
                     else:
                         logger.warning(f"No car found for {brand} {model} after {max_retries} attempts")
                         return None
-                
+
                 except Exception as e:
                     logger.error(f"Error in search attempt {attempt + 1} for {brand} {model}: {e}")
                     if attempt < max_retries - 1:
                         await asyncio.sleep(retry_delay)
                     else:
                         raise
-        
+
         except Exception as e:
             logger.error(f"Error getting car data by name: {e}")
             return None

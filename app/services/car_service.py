@@ -783,6 +783,10 @@ class CarService:
             # Load CSV data
             df = pd.read_csv('data/cars_data.csv')
             
+            # Log unique vehicle styles for debugging
+            logger.info(f"Available vehicle styles in database: {df['Vehicle Style'].unique().tolist()}")
+            logger.info(f"Searching for vehicle style: {vehicle_style}")
+            
             # Create a mask for filtering
             mask = pd.Series(True, index=df.index)
             
@@ -833,10 +837,21 @@ class CarService:
                 mask &= df['MSRP'].fillna(0) <= max_price
                 
             if vehicle_style:
-                if partial_match:
-                    mask &= df['Vehicle Style'].str.lower().fillna('').str.contains(vehicle_style.lower(), na=False)
-                else:
-                    mask &= df['Vehicle Style'].str.lower().fillna('') == vehicle_style.lower()
+                # Always use partial match for vehicle style
+                vehicle_style = vehicle_style.lower()
+                vehicle_style_variations = [
+                    vehicle_style,
+                    vehicle_style.replace(' ', ''),
+                    vehicle_style.replace(' ', '-'),
+                    vehicle_style.replace('-', ' '),
+                    vehicle_style.replace('suv', 's.u.v'),
+                    vehicle_style.replace('s.u.v', 'suv')
+                ]
+                vehicle_style_mask = pd.Series(False, index=df.index)
+                for variation in vehicle_style_variations:
+                    vehicle_style_mask |= df['Vehicle Style'].str.lower().fillna('').str.contains(variation, na=False)
+                mask &= vehicle_style_mask
+                logger.info(f"Found {vehicle_style_mask.sum()} matches for vehicle style")
                     
             if search_query:
                 search_query = search_query.lower()
@@ -849,6 +864,11 @@ class CarService:
             
             # Apply the mask
             filtered_df = df[mask]
+            
+            # Log results for debugging
+            logger.info(f"Total matches after filtering: {len(filtered_df)}")
+            if len(filtered_df) > 0:
+                logger.info(f"Sample matches: {filtered_df[['Make', 'Model', 'Vehicle Style', 'id']].head().to_dict('records')}")
             
             # Sort if specified
             if sort_by:
@@ -865,6 +885,11 @@ class CarService:
             
             # Convert to list of dictionaries
             items = paginated_df.to_dict('records')
+            
+            # Ensure each item has an id field
+            for item in items:
+                if 'id' not in item:
+                    item['id'] = str(item.get('_id', '')) if '_id' in item else str(item.get('id', ''))
             
             return {
                 "items": items,
