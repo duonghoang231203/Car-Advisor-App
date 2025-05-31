@@ -77,7 +77,13 @@ class FunctionCallingService:
                         "year": {"type": "integer", "description": "Car year"},
                         "min_price": {"type": "number", "description": "Minimum price"},
                         "max_price": {"type": "number", "description": "Maximum price"},
-                        "vehicle_style": {"type": "string", "description": "Type of vehicle (e.g., Sedan, SUV)"}
+                        "vehicle_style": {"type": "string", "description": "Type of vehicle (e.g., Sedan, SUV)"},
+                        "number_of_doors": {"type": "integer", "description": "Number of doors (e.g., 2, 4)"},
+                        "engine_fuel_type": {"type": "string", "description": "Type of fuel (e.g., Gasoline, Diesel, Electric)"},
+                        "transmission_type": {"type": "string", "description": "Type of transmission (e.g., Manual, Automatic)"},
+                        "driven_wheels": {"type": "string", "description": "Type of driven wheels (e.g., FWD, RWD, AWD)"},
+                        "market_category": {"type": "string", "description": "Market category (e.g., Luxury, Performance)"},
+                        "vehicle_size": {"type": "string", "description": "Size of vehicle (e.g., Compact, Midsize, Large)"}
                     }
                 }
             },
@@ -293,6 +299,12 @@ Your responses should feel like a conversation with a car expert who's passionat
                         search_params = CarSearchParams(
                             brand=function_args.get("make"),
                             vehicle_style=function_args.get("vehicle_style"),
+                            number_of_doors=function_args.get("number_of_doors"),
+                            engine_fuel_type=function_args.get("engine_fuel_type"),
+                            transmission_type=function_args.get("transmission_type"),
+                            driven_wheels=function_args.get("driven_wheels"),
+                            market_category=function_args.get("market_category"),
+                            vehicle_size=function_args.get("vehicle_size"),
                             partial_match=True,
                             page=1,
                             page_size=20  # Increase page size to get more diverse options

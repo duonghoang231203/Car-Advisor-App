@@ -1,7 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from app.db.mongodb import mongodb
 from app.db.vector_store import vector_db
 from app.models.car import Car
 import asyncio

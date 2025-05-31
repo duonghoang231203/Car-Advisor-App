@@ -482,27 +482,87 @@ class CarService:
             return None
 
     async def _build_search_query(self, params: CarSearchParams):
-        """Build a search query based on essential parameters"""
-        # Use distinct on brand and model to avoid duplicates
-        query = select(Car).distinct(Car.brand, Car.model)
-
-        # Add filters based on parameters
+        """Build the search query based on the provided parameters"""
+        query = select(Car).options(selectinload(Car.specifications))
+        
+        # Build filters based on search parameters
+        filters = []
+        
+        # Basic search fields
         if params.brand:
             if params.partial_match:
-                query = query.where(Car.brand.like(f"%{params.brand}%"))
+                filters.append(Car.brand.ilike(f"%{params.brand}%"))
             else:
-                query = query.where(Car.brand == params.brand)
-
-        # Add vehicle_style filtering if specified
-        if params.vehicle_style:
-            # Join with CarSpecification table to filter by body_type (vehicle_style)
-            query = query.join(CarSpecification, Car.id == CarSpecification.car_id)
-
+                filters.append(Car.brand == params.brand)
+                
+        if params.model:
             if params.partial_match:
-                query = query.where(CarSpecification.body_type.like(f"%{params.vehicle_style}%"))
+                filters.append(Car.model.ilike(f"%{params.model}%"))
             else:
-                query = query.where(CarSpecification.body_type == params.vehicle_style)
-
+                filters.append(Car.model == params.model)
+                
+        if params.year:
+            filters.append(Car.year == params.year)
+            
+        if params.min_price:
+            filters.append(Car.price >= params.min_price)
+            
+        if params.max_price:
+            filters.append(Car.price <= params.max_price)
+            
+        if params.vehicle_style:
+            if params.partial_match:
+                filters.append(Car.specifications.has(CarSpecification.vehicle_style.ilike(f"%{params.vehicle_style}%")))
+            else:
+                filters.append(Car.specifications.has(CarSpecification.vehicle_style == params.vehicle_style))
+        
+        # Car specifications
+        if params.number_of_doors:
+            filters.append(Car.specifications.has(CarSpecification.number_of_doors == params.number_of_doors))
+            
+        if params.engine_fuel_type:
+            if params.partial_match:
+                filters.append(Car.specifications.has(CarSpecification.engine_fuel_type.ilike(f"%{params.engine_fuel_type}%")))
+            else:
+                filters.append(Car.specifications.has(CarSpecification.engine_fuel_type == params.engine_fuel_type))
+                
+        if params.transmission_type:
+            if params.partial_match:
+                filters.append(Car.specifications.has(CarSpecification.transmission_type.ilike(f"%{params.transmission_type}%")))
+            else:
+                filters.append(Car.specifications.has(CarSpecification.transmission_type == params.transmission_type))
+                
+        if params.driven_wheels:
+            if params.partial_match:
+                filters.append(Car.specifications.has(CarSpecification.driven_wheels.ilike(f"%{params.driven_wheels}%")))
+            else:
+                filters.append(Car.specifications.has(CarSpecification.driven_wheels == params.driven_wheels))
+                
+        if params.market_category:
+            if params.partial_match:
+                filters.append(Car.specifications.has(CarSpecification.market_category.ilike(f"%{params.market_category}%")))
+            else:
+                filters.append(Car.specifications.has(CarSpecification.market_category == params.market_category))
+                
+        if params.vehicle_size:
+            if params.partial_match:
+                filters.append(Car.specifications.has(CarSpecification.vehicle_size.ilike(f"%{params.vehicle_size}%")))
+            else:
+                filters.append(Car.specifications.has(CarSpecification.vehicle_size == params.vehicle_size))
+        
+        # Apply all filters
+        if filters:
+            query = query.where(*filters)
+            
+        # Apply sorting
+        if params.sort_by:
+            sort_field = getattr(Car, params.sort_by, None)
+            if sort_field:
+                if params.sort_direction.lower() == "desc":
+                    query = query.order_by(desc(sort_field))
+                else:
+                    query = query.order_by(asc(sort_field))
+        
         return query
 
     async def search_cars(self, params: CarSearchParams) -> List[Car]:
@@ -520,8 +580,8 @@ class CarService:
             try:
                 print(f"Search params: {params}")
 
-                # Build the base query
-                query = select(Car)
+                # Build the base query with join to car_specifications
+                query = select(Car).join(CarSpecification, Car.id == CarSpecification.car_id)
                 print(f"Base query: {query}")
 
                 # Apply brand filter if specified
@@ -534,18 +594,47 @@ class CarService:
 
                 # Apply vehicle_style filter if specified
                 if params.vehicle_style:
-                    # Use the description field to filter by vehicle_style
-                    # This is a workaround until we properly populate the car_specifications table
                     if params.partial_match:
-                        query = query.where(Car.description.like(f"%{params.vehicle_style}%"))
+                        query = query.where(CarSpecification.vehicle_style.like(f"%{params.vehicle_style}%"))
                     else:
-                        # For SUV, we need to be more flexible with the search
-                        if params.vehicle_style.upper() == "SUV":
-                            # Try to match any description that contains "SUV"
-                            query = query.where(Car.description.like(f"%SUV%"))
-                        else:
-                            query = query.where(Car.description.like(f"%{params.vehicle_style}%"))
+                        query = query.where(CarSpecification.vehicle_style == params.vehicle_style)
                     print(f"After vehicle_style filter: {query}")
+
+                # Apply number_of_doors filter if specified
+                if params.number_of_doors:
+                    query = query.where(CarSpecification.number_of_doors == params.number_of_doors)
+                    print(f"After number_of_doors filter: {query}")
+
+                # Apply other specification filters
+                if params.engine_fuel_type:
+                    if params.partial_match:
+                        query = query.where(CarSpecification.engine_fuel_type.like(f"%{params.engine_fuel_type}%"))
+                    else:
+                        query = query.where(CarSpecification.engine_fuel_type == params.engine_fuel_type)
+
+                if params.transmission_type:
+                    if params.partial_match:
+                        query = query.where(CarSpecification.transmission_type.like(f"%{params.transmission_type}%"))
+                    else:
+                        query = query.where(CarSpecification.transmission_type == params.transmission_type)
+
+                if params.driven_wheels:
+                    if params.partial_match:
+                        query = query.where(CarSpecification.driven_wheels.like(f"%{params.driven_wheels}%"))
+                    else:
+                        query = query.where(CarSpecification.driven_wheels == params.driven_wheels)
+
+                if params.market_category:
+                    if params.partial_match:
+                        query = query.where(CarSpecification.market_category.like(f"%{params.market_category}%"))
+                    else:
+                        query = query.where(CarSpecification.market_category == params.market_category)
+
+                if params.vehicle_size:
+                    if params.partial_match:
+                        query = query.where(CarSpecification.vehicle_size.like(f"%{params.vehicle_size}%"))
+                    else:
+                        query = query.where(CarSpecification.vehicle_size == params.vehicle_size)
 
                 # Check if there are any cars in the database
                 check_query = select(func.count()).select_from(Car)
@@ -582,25 +671,14 @@ class CarService:
                 cars = result.scalars().all()
                 print(f"Number of cars returned: {len(cars)}")
 
-                # We want to show all cars that match the search criteria
-                # No need to deduplicate for search results
-                unique_car_list = cars
-                print(f"Number of cars to display: {len(unique_car_list)}")
-
-                # Calculate total pages
-                total_pages = (total_count + params.page_size - 1) // params.page_size if total_count > 0 else 0
-
-                # Convert SQLAlchemy models to dictionaries to avoid lazy loading issues
+                # Convert SQLAlchemy models to dictionaries
                 car_dicts = []
-                for car in unique_car_list:
-                    # Extract vehicle_type from description
-                    vehicle_type = None
-                    if car.description:
-                        # The description format is typically "The {brand} {model} is a {vehicle_style} car."
-                        # Example: "The Ford Bronco II is a 2dr SUV car."
-                        match = re.search(r'is a (.*?) car\.', car.description)
-                        if match:
-                            vehicle_type = match.group(1)
+                for car in cars:
+                    # Get specifications for this car
+                    spec_result = await session.execute(
+                        select(CarSpecification).where(CarSpecification.car_id == car.id)
+                    )
+                    spec = spec_result.scalars().first()
 
                     car_dict = {
                         "id": car.id,
@@ -612,9 +690,29 @@ class CarService:
                         "condition": car.condition,
                         "type": car.type,
                         "description": car.description,
-                        "specifications": None,  # Set to None to avoid lazy loading issues
+                        "specifications": {
+                            "engine": spec.engine if spec else None,
+                            "transmission": spec.transmission if spec else None,
+                            "fuel_type": spec.fuel_type if spec else None,
+                            "mileage": float(spec.mileage) if spec and spec.mileage else None,
+                            "seating_capacity": spec.seating_capacity if spec else None,
+                            "body_type": spec.body_type if spec else None,
+                            "engine_hp": spec.engine_hp if spec else None,
+                            "engine_cylinders": spec.engine_cylinders if spec else None,
+                            "engine_fuel_type": spec.engine_fuel_type if spec else None,
+                            "transmission_type": spec.transmission_type if spec else None,
+                            "driven_wheels": spec.driven_wheels if spec else None,
+                            "number_of_doors": spec.number_of_doors if spec else None,
+                            "market_category": spec.market_category if spec else None,
+                            "vehicle_size": spec.vehicle_size if spec else None,
+                            "vehicle_style": spec.vehicle_style if spec else None,
+                            "highway_mpg": spec.highway_mpg if spec else None,
+                            "city_mpg": spec.city_mpg if spec else None,
+                            "popularity": spec.popularity if spec else None,
+                            "msrp": spec.msrp if spec else None
+                        } if spec else None,
                         "image_urls": [],
-                        "vehicle_type": vehicle_type  # Add the extracted vehicle_type
+                        "vehicle_type": spec.vehicle_style if spec else None
                     }
                     car_dicts.append(car_dict)
 
@@ -624,7 +722,7 @@ class CarService:
                     total=total_count,
                     page=params.page,
                     page_size=params.page_size,
-                    total_pages=total_pages
+                    total_pages=(total_count + params.page_size - 1) // params.page_size if total_count > 0 else 0
                 )
             except Exception as e:
                 print(f"Error in search_cars_paginated: {e}")
@@ -783,6 +881,10 @@ class CarService:
             # Load CSV data
             df = pd.read_csv('data/cars_data.csv')
             
+            # Ensure we have an id column - use index if no id column exists
+            if 'id' not in df.columns:
+                df['id'] = df.index.astype(str)
+            
             # Log unique vehicle styles for debugging
             logger.info(f"Available vehicle styles in database: {df['Vehicle Style'].unique().tolist()}")
             logger.info(f"Searching for vehicle style: {vehicle_style}")
@@ -883,13 +985,71 @@ class CarService:
             # Get paginated results
             paginated_df = filtered_df.iloc[start_idx:end_idx]
             
-            # Convert to list of dictionaries
-            items = paginated_df.to_dict('records')
-            
-            # Ensure each item has an id field
-            for item in items:
-                if 'id' not in item:
-                    item['id'] = str(item.get('_id', '')) if '_id' in item else str(item.get('id', ''))
+            # Convert to list of dictionaries with proper formatting
+            items = []
+            for _, row in paginated_df.iterrows():
+                try:
+                    # Create engine string
+                    engine_hp = row['Engine HP'] if 'Engine HP' in row and pd.notna(row['Engine HP']) else 0
+                    engine_cylinders = row['Engine Cylinders'] if 'Engine Cylinders' in row and pd.notna(row['Engine Cylinders']) else 0
+                    engine_str = f"{engine_hp} HP, {engine_cylinders} cylinders"
+                    
+                    # Create specifications
+                    specifications = {
+                        "engine": engine_str,
+                        "transmission": row['Transmission Type'] if 'Transmission Type' in row and pd.notna(row['Transmission Type']) else 'Unknown',
+                        "fuel_type": row['Engine Fuel Type'] if 'Engine Fuel Type' in row and pd.notna(row['Engine Fuel Type']) else 'Unknown',
+                        "mileage": float(row['highway MPG']) if 'highway MPG' in row and pd.notna(row['highway MPG']) else None,
+                        "seating_capacity": 5,  # Default value
+                        "body_type": row['Vehicle Style'] if 'Vehicle Style' in row and pd.notna(row['Vehicle Style']) else 'Unknown',
+                        "engine_hp": int(engine_hp) if pd.notna(engine_hp) else None,
+                        "engine_cylinders": int(engine_cylinders) if pd.notna(engine_cylinders) else None,
+                        "engine_fuel_type": row['Engine Fuel Type'] if 'Engine Fuel Type' in row and pd.notna(row['Engine Fuel Type']) else 'Unknown',
+                        "transmission_type": row['Transmission Type'] if 'Transmission Type' in row and pd.notna(row['Transmission Type']) else 'Unknown',
+                        "driven_wheels": row['Driven_Wheels'] if 'Driven_Wheels' in row and pd.notna(row['Driven_Wheels']) else 'Unknown',
+                        "number_of_doors": int(row['Number of Doors']) if 'Number of Doors' in row and pd.notna(row['Number of Doors']) else 4,
+                        "market_category": row['Market Category'] if 'Market Category' in row and pd.notna(row['Market Category']) else 'Unknown',
+                        "vehicle_size": row['Vehicle Size'] if 'Vehicle Size' in row and pd.notna(row['Vehicle Size']) else 'Unknown',
+                        "vehicle_style": row['Vehicle Style'] if 'Vehicle Style' in row and pd.notna(row['Vehicle Style']) else 'Unknown',
+                        "highway_mpg": float(row['highway MPG']) if 'highway MPG' in row and pd.notna(row['highway MPG']) else None,
+                        "city_mpg": int(row['city mpg']) if 'city mpg' in row and pd.notna(row['city mpg']) else None,
+                        "popularity": int(row['Popularity']) if 'Popularity' in row and pd.notna(row['Popularity']) else None,
+                        "msrp": float(row['MSRP']) if 'MSRP' in row and pd.notna(row['MSRP']) else None
+                    }
+                    
+                    # Create car item matching CarResponse model structure
+                    car_item = {
+                        "id": int(row['id']),  # Convert to int as required by model
+                        "name": f"{row['Make']} {row['Model']}",
+                        "brand": row['Make'],
+                        "model": row['Model'],
+                        "year": int(row['Year']) if pd.notna(row['Year']) else 2024,  # Default to current year if missing
+                        "price": float(row['MSRP']) if pd.notna(row['MSRP']) else 0.0,  # Default to 0 if missing
+                        "condition": "new",  # Default value
+                        "type": "buy",  # Default value
+                        "description": f"The {row['Make']} {row['Model']} is a {row['Vehicle Style'] if pd.notna(row['Vehicle Style']) else 'car'}.",
+                        "image_urls": [],
+                        "vehicle_type": row['Vehicle Style'] if pd.notna(row['Vehicle Style']) else 'Unknown',
+                        "make": row['Make'],  # Same as brand
+                        "engine_fuel_type": row['Engine Fuel Type'] if 'Engine Fuel Type' in row and pd.notna(row['Engine Fuel Type']) else 'Unknown',
+                        "engine_hp": int(engine_hp) if pd.notna(engine_hp) else None,
+                        "engine_cylinders": int(engine_cylinders) if pd.notna(engine_cylinders) else None,
+                        "transmission_type": row['Transmission Type'] if 'Transmission Type' in row and pd.notna(row['Transmission Type']) else 'Unknown',
+                        "driven_wheels": row['Driven_Wheels'] if 'Driven_Wheels' in row and pd.notna(row['Driven_Wheels']) else 'Unknown',
+                        "number_of_doors": int(row['Number of Doors']) if 'Number of Doors' in row and pd.notna(row['Number of Doors']) else 4,
+                        "market_category": row['Market Category'] if 'Market Category' in row and pd.notna(row['Market Category']) else 'Unknown',
+                        "vehicle_size": row['Vehicle Size'] if 'Vehicle Size' in row and pd.notna(row['Vehicle Size']) else 'Unknown',
+                        "vehicle_style": row['Vehicle Style'] if pd.notna(row['Vehicle Style']) else 'Unknown',
+                        "highway_mpg": float(row['highway MPG']) if 'highway MPG' in row and pd.notna(row['highway MPG']) else None,
+                        "city_mpg": int(row['city mpg']) if 'city mpg' in row and pd.notna(row['city mpg']) else None,
+                        "popularity": int(row['Popularity']) if 'Popularity' in row and pd.notna(row['Popularity']) else None,
+                        "msrp": float(row['MSRP']) if pd.notna(row['MSRP']) else None,
+                        "specifications": specifications
+                    }
+                    items.append(car_item)
+                except Exception as e:
+                    logger.error(f"Error processing row: {e}")
+                    continue
             
             return {
                 "items": items,
