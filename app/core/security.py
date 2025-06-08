@@ -1,14 +1,15 @@
 from datetime import datetime, timedelta
 from typing import Any, Optional
-from jose import jwt
+from jose import jwt, JWTError
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, HTTPException, status
 from app.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # OAuth2 scheme for token authentication
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
@@ -33,4 +34,26 @@ def get_password_hash(password: str) -> str:
     """
     Hash a password
     """
-    return pwd_context.hash(password) 
+    return pwd_context.hash(password)
+
+def get_current_user_id(token: str = Depends(oauth2_scheme)) -> str:
+    """
+    Decode JWT token and extract user ID
+    """
+    print(f"Received token: {token[:20]}...")  # Log first 20 chars for debugging
+    
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id: str = payload.get("sub")
+        print(f"Decoded user_id: {user_id}")
+        if user_id is None:
+            raise credentials_exception
+        return user_id
+    except JWTError as e:
+        print(f"JWT Error: {e}")
+        raise credentials_exception 

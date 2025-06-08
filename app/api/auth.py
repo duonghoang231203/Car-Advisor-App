@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm
 from app.models.user import UserCreate, UserResponse, UserInDB
 from app.models.user import User
 from app.core.database import mysql
@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
 router = APIRouter()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_PREFIX}/auth/login")
 
 @router.post("/register", response_model=UserResponse)
 async def register(

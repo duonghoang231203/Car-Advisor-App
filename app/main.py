@@ -10,6 +10,7 @@ from app.config import settings
 import asyncio
 from contextlib import asynccontextmanager
 import signal
+from fastapi.openapi.utils import get_openapi
 
 # Configure logging
 logging.basicConfig(
@@ -90,7 +91,17 @@ app = FastAPI(
     description="API for car rental management system",
     version="1.0.0",
     docs_url="/docs",  # Enable Swagger UI at /docs
-    lifespan=lifespan
+    lifespan=lifespan,
+    swagger_ui_init_oauth={
+        "usePkceWithAuthorizationCodeGrant": True,
+    },
+    openapi_tags=[
+        {"name": "Authentication", "description": "Authentication operations"},
+        {"name": "Users", "description": "User management operations"},
+        {"name": "Cars", "description": "Car operations"},
+        {"name": "Chat", "description": "Chat operations"},
+        {"name": "Monitoring", "description": "Monitoring operations"},
+    ]
 )
 
 # Configure CORS
@@ -121,6 +132,28 @@ async def root():
 async def health():
     logger.info("Health check endpoint accessed")
     return {"status": "ok"}
+
+# Add security scheme for Bearer token
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=settings.APP_NAME,
+        version="1.0.0",
+        description="API for car rental management system",
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+    }
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 if __name__ == "__main__":
     logger.info("Starting development server...")
