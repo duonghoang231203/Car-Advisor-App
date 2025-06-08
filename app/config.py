@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # Security settings
     SECRET_KEY: str = "your-secret-key"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ALGORITHM: str = "HS256"
 
     # CORS settings
     CORS_ORIGINS: Union[str, List[str]] = Field(

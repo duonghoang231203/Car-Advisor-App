@@ -45,8 +45,7 @@ async def register(
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         full_name=user_data.full_name,
-        phone_number=user_data.phone_number,
-        preferences=user_data.preferences
+        phone_number=user_data.phone_number
     )
 
     # Insert user into database
@@ -60,7 +59,6 @@ async def register(
         email=user_in_db.email,
         full_name=user_in_db.full_name,
         phone_number=user_in_db.phone_number,
-        preferences=user_in_db.preferences,
         created_at=user_in_db.created_at
     )
 
@@ -72,8 +70,12 @@ async def login(
     """
     OAuth2 compatible token login, get an access token for future requests
     """
-    # Find user by username
-    result = await session.execute(select(User).where(User.username == form_data.username))
+    # Find user by username or email
+    result = await session.execute(
+        select(User).where(
+            (User.username == form_data.username) | (User.email == form_data.username)
+        )
+    )
     user = result.scalars().first()
     if not user:
         raise HTTPException(
