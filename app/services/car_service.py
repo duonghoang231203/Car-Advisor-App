@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.core.database import mysql
 from app.core.logging import logger
 from fastapi import HTTPException, status
+from app.services.enhanced_car_service import enhanced_car_service
 
 class CarService:
     def __init__(self):
@@ -59,9 +60,19 @@ class CarService:
             # to avoid type conversion issues
             df = pd.read_csv(csv_path, low_memory=False)
 
-            # Pre-compute some common operations
+            # Pre-compute some common operations for better search performance
             if 'Make' in df.columns and 'Model' in df.columns:
                 df['full_name'] = df['Make'] + ' ' + df['Model']
+                
+                # Pre-compute combined search field for faster searching
+                df['combined_search'] = (
+                    df['Make'].astype(str).fillna('') + ' ' +
+                    df['Model'].astype(str).fillna('') + ' ' +
+                    df['Vehicle Style'].astype(str).fillna('') + ' ' +
+                    df['Engine Fuel Type'].astype(str).fillna('') + ' ' +
+                    df['Transmission Type'].astype(str).fillna('') + ' ' +
+                    df['Market Category'].astype(str).fillna('')
+                ).str.lower()
 
             load_time = time.time() - start_time
             logger.info(f"CSV data loaded in {load_time:.2f} seconds")
@@ -472,6 +483,33 @@ class CarService:
                         "msrp": spec.msrp if spec else car.price
                     } if spec else None
                 }
+
+                # TÍCH HỢP DỮ LIỆU XE NÂNG CAO
+                try:
+                    enhanced_data = await enhanced_car_service.get_enhanced_car_details(
+                        car_name=car.name,
+                        car_brand=car.brand, 
+                        car_year=car.year
+                    )
+                    
+                    if enhanced_data:
+                        logger.info(f"Found enhanced data for {car.brand} {car.year}")
+                        # Merge enhanced data vào car_dict
+                        car_dict.update(enhanced_data)
+                        
+                        # Thêm flag để biết xe này có dữ liệu nâng cao
+                        car_dict["has_enhanced_data"] = True
+                        
+                        # Cập nhật vehicle_type nếu có dữ liệu nâng cao tốt hơn
+                        if enhanced_data.get("vehicle_type"):
+                            car_dict["vehicle_type"] = enhanced_data["vehicle_type"]
+                    else:
+                        logger.info(f"No enhanced data found for {car.brand} {car.year}")
+                        car_dict["has_enhanced_data"] = False
+                        
+                except Exception as e:
+                    logger.warning(f"Error fetching enhanced data for car {car_id}: {e}")
+                    car_dict["has_enhanced_data"] = False
 
                 return car_dict
 
@@ -956,21 +994,111 @@ class CarService:
                 logger.info(f"Found {vehicle_style_mask.sum()} matches for vehicle style")
                     
             if search_query:
-                search_query = search_query.lower()
-                search_mask = (
-                    df['Make'].str.lower().fillna('').str.contains(search_query, na=False) |
-                    df['Model'].str.lower().fillna('').str.contains(search_query, na=False) |
-                    df['Vehicle Style'].str.lower().fillna('').str.contains(search_query, na=False)
-                )
+                search_query = search_query.lower().strip()
+                
+                # Create a combined search field from multiple columns if not already exists
+                if 'combined_search' not in df.columns:
+                    df['combined_search'] = (
+                        df['Make'].astype(str).fillna('') + ' ' +
+                        df['Model'].astype(str).fillna('') + ' ' +
+                        df['Vehicle Style'].astype(str).fillna('') + ' ' +
+                        df['Engine Fuel Type'].astype(str).fillna('') + ' ' +
+                        df['Transmission Type'].astype(str).fillna('') + ' ' +
+                        df['Market Category'].astype(str).fillna('')
+                    ).str.lower()
+                
+                # Split search query into individual terms
+                search_terms = search_query.split()
+                
+                # Create search mask - all terms must be found in the combined field
+                search_mask = pd.Series(True, index=df.index)
+                for term in search_terms:
+                    if term:  # Skip empty terms
+                        term_mask = (
+                            # Search in combined field
+                            df['combined_search'].str.contains(term, na=False) |
+                            # Also search in individual fields for exact matches
+                            df['Make'].str.lower().fillna('').str.contains(term, na=False) |
+                            df['Model'].str.lower().fillna('').str.contains(term, na=False) |
+                            df['Vehicle Style'].str.lower().fillna('').str.contains(term, na=False) |
+                            # Handle numeric searches (year, hp, etc.)
+                            df['Year'].astype(str).str.contains(term, na=False) |
+                            df['Engine HP'].astype(str).str.contains(term, na=False) |
+                            df['Engine Cylinders'].astype(str).str.contains(term, na=False)
+                        )
+                        search_mask &= term_mask
+                
+                # Additional intelligent matching for common variations
+                if len(search_terms) >= 2:
+                    # Try to match "brand model" combinations more intelligently
+                    full_query_variations = [
+                        search_query,
+                        search_query.replace(' ', ''),
+                        search_query.replace(' ', '-'),
+                        search_query.replace('-', ' '),
+                        search_query.replace('series', '').strip(),
+                        search_query.replace('class', '').strip()
+                    ]
+                    
+                    fuzzy_mask = pd.Series(False, index=df.index)
+                    for variation in full_query_variations:
+                        if variation:  # Skip empty variations
+                            fuzzy_mask |= df['combined_search'].str.contains(variation, na=False)
+                    
+                    # Smart matching for brand + model combinations
+                    # Check if first term matches brand and second term matches model
+                    if len(search_terms) == 2:
+                        brand_term, model_term = search_terms[0], search_terms[1]
+                        brand_model_mask = (
+                            (df['Make'].str.lower().fillna('').str.contains(brand_term, na=False) &
+                             df['Model'].str.lower().fillna('').str.contains(model_term, na=False)) |
+                            (df['Model'].str.lower().fillna('').str.contains(brand_term, na=False) &
+                             df['Make'].str.lower().fillna('').str.contains(model_term, na=False))
+                        )
+                        fuzzy_mask |= brand_model_mask
+                    
+                    # Combine with main search mask using OR for flexibility
+                    search_mask |= fuzzy_mask
+                
+                # Boost exact matches for better ranking
+                if search_query:
+                    exact_match_mask = (
+                        (df['Make'].str.lower().fillna('') + ' ' + df['Model'].str.lower().fillna('')) == search_query
+                    )
+                    # If we have exact matches, prioritize them
+                    if exact_match_mask.any():
+                        search_mask |= exact_match_mask
+                
                 mask &= search_mask
             
             # Apply the mask
             filtered_df = df[mask]
             
-            # Log results for debugging
-            logger.info(f"Total matches after filtering: {len(filtered_df)}")
-            if len(filtered_df) > 0:
+            # Enhanced logging for debugging search performance
+            logger.info(f"Search Query: '{search_query}' | Total matches: {len(filtered_df)} out of {len(df)} total cars")
+            if search_query and len(filtered_df) > 0:
+                # Log search terms for debugging
+                search_terms_used = search_query.split() if search_query else []
+                logger.info(f"Search terms used: {search_terms_used}")
                 logger.info(f"Sample matches: {filtered_df[['Make', 'Model', 'Vehicle Style', 'id']].head().to_dict('records')}")
+            elif search_query and len(filtered_df) == 0:
+                logger.warning(f"No matches found for search query: '{search_query}'")
+                # Log some suggestions for debugging
+                if 'Make' in df.columns:
+                    unique_makes = df['Make'].unique()[:10]  # Show first 10 makes
+                    logger.info(f"Available makes (sample): {unique_makes.tolist()}")
+            
+            # Log filter summary
+            active_filters = []
+            if make: active_filters.append(f"make={make}")
+            if model: active_filters.append(f"model={model}")
+            if year: active_filters.append(f"year={year}")
+            if vehicle_style: active_filters.append(f"vehicle_style={vehicle_style}")
+            if min_price: active_filters.append(f"min_price={min_price}")
+            if max_price: active_filters.append(f"max_price={max_price}")
+            
+            if active_filters:
+                logger.info(f"Active filters: {', '.join(active_filters)}")
             
             # Sort if specified
             if sort_by:

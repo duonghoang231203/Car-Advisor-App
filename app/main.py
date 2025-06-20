@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import mysql
-from app.api import cars, user as users, auth, chat, monitoring
+from app.api import cars, user as users, auth, chat, monitoring, enhanced_cars
 from app.core.logging import logger
 from app.core.monitoring import MonitoringMiddleware
 import logging
@@ -99,6 +99,7 @@ app = FastAPI(
         {"name": "Authentication", "description": "Authentication operations"},
         {"name": "Users", "description": "User management operations"},
         {"name": "Cars", "description": "Car operations"},
+        {"name": "Enhanced Cars", "description": "Enhanced car data operations"},
         {"name": "Chat", "description": "Chat operations"},
         {"name": "Monitoring", "description": "Monitoring operations"},
     ]
@@ -118,6 +119,7 @@ app.add_middleware(MonitoringMiddleware)
 
 # Include routers with explicit paths
 app.include_router(cars.router, prefix=f"{settings.API_PREFIX}/cars", tags=["Cars"])
+app.include_router(enhanced_cars.router, prefix=f"{settings.API_PREFIX}/enhanced-cars", tags=["Enhanced Cars"])
 app.include_router(users.router, prefix=f"{settings.API_PREFIX}/users", tags=["Users"])
 app.include_router(auth.router, prefix=f"{settings.API_PREFIX}/auth", tags=["Authentication"])
 app.include_router(chat.router, prefix=f"{settings.API_PREFIX}/chat", tags=["Chat"])

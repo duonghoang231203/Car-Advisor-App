@@ -53,3 +53,8 @@ class MySQL:
             await session.close()
 
 mysql = MySQL()
+
+def get_database_url():
+    """Get database URL for synchronous connections"""
+    # Convert async database URL to sync URL for SQLAlchemy ORM
+    return settings.DATABASE_URL.replace("mysql+aiomysql://", "mysql+pymysql://")

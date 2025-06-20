@@ -98,10 +98,10 @@ async def process_speech(
             detail=f"Error processing speech: {str(e)}"
         )
 
-@router.get("/history", response_model=List[Message])
+@router.get("/history")
 async def get_chat_history(
     session_id: str
-) -> List[Message]:
+) -> Dict[str, Any]:
     """
     Get chat history for a specific session
     """
@@ -113,7 +113,19 @@ async def get_chat_history(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Chat session not found"
             )
-        return session.messages
+        
+        # Convert messages to the format expected by the frontend
+        messages = []
+        for message in session.messages:
+            messages.append({
+                "message": message.content,
+                "is_user": message.role == "user",
+                "timestamp": datetime.utcnow().isoformat(),  # Use current time as placeholder
+                "car_options": None,  # Will be populated if needed
+                "is_loading": False
+            })
+        
+        return {"messages": messages}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -121,7 +133,7 @@ async def get_chat_history(
         )
 
 @router.get("/sessions")
-async def get_chat_sessions() -> List[dict]:
+async def get_chat_sessions() -> Dict[str, Any]:
     """
     Get all chat sessions for the current user
     """
@@ -134,15 +146,28 @@ async def get_chat_sessions() -> List[dict]:
             messages = session.messages
             first_message = messages[0].content if messages else ""
             last_message = messages[-1].content if messages else ""
+            
+            # Convert messages to the format expected by ChatSession.fromJson()
+            formatted_messages = []
+            for message in messages:
+                formatted_messages.append({
+                    "message": message.content,
+                    "is_user": message.role == "user",
+                    "timestamp": datetime.utcnow().isoformat(),  # Use current time as placeholder
+                    "car_options": None,  # Will be populated if needed
+                    "is_loading": False
+                })
+            
             result.append({
                 "session_id": str(session.id),
-                "created_at": session.created_at,
-                "updated_at": session.updated_at,
+                "created_at": session.created_at.isoformat(),
+                "updated_at": session.updated_at.isoformat(),
+                "messages": formatted_messages,
                 "message_count": len(messages),
                 "preview": first_message[:50] + "..." if len(first_message) > 50 else first_message,
                 "last_message": last_message[:50] + "..." if len(last_message) > 50 else last_message
             })
-        return result
+        return {"sessions": result}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
